@@ -1,5 +1,6 @@
 import asyncio
 import logging
+logging.basicConfig(filename="/tmp/quench.log", level=logging.DEBUG)
 from typing import Optional
 
 import pynvim
@@ -105,71 +106,206 @@ class Quench:
         
         self._logger.info("Async cleanup completed")
 
-    @pynvim.function("QuenchRunCell", sync=False)
-    async def run_cell(self, args):
+    @pynvim.command("QuenchRunCell", sync=True)
+    def run_cell(self):
         """
         Execute the current cell in IPython kernel.
         
         This is the main function users will call to execute Python code cells.
         """
         try:
-            self._logger.info("QuenchRunCell called")
+            self._logger.info("QuenchRunCell called - starting execution")
+            self.nvim.out_write("QuenchRunCell: Starting execution...\n")
             
-            # Get current buffer and line number
-            current_bnum = await self.ui_manager.get_current_bnum()
-            current_line = self.nvim.current.window.cursor[0]  # 1-indexed
-            
-            self._logger.debug(f"Current buffer: {current_bnum}, line: {current_line}")
-            
-            # Extract cell code
-            cell_code = await self.ui_manager.get_cell_code(current_bnum, current_line)
-            
-            if not cell_code.strip():
-                self.nvim.out_write("No code found in current cell\n")
+            # Get all the synchronous Neovim data we need first (from main thread)
+            try:
+                current_bnum = self.nvim.current.buffer.number
+                current_line = self.nvim.current.window.cursor[0]  # 1-indexed
+                
+                # Get buffer content synchronously
+                buffer = self.nvim.current.buffer
+                lines = buffer[:]
+                self._logger.info(f"Got buffer data: {current_bnum}, line {current_line}, {len(lines)} lines")
+                
+            except Exception as e:
+                self._logger.error(f"Error getting buffer data: {e}")
+                self.nvim.err_write(f"Error accessing buffer: {e}\n")
                 return
             
-            self._logger.debug(f"Cell code extracted: {len(cell_code)} characters")
+            # Extract cell code synchronously
+            try:
+                cell_code = self._extract_cell_code_sync(lines, current_line)
+                if not cell_code.strip():
+                    self.nvim.out_write("No code found in current cell\n")
+                    return
+                
+                self._logger.debug(f"Cell code extracted: {len(cell_code)} characters")
+                self.nvim.out_write(f"Executing cell ({len(cell_code)} chars)...\n")
+                
+            except Exception as e:
+                self._logger.error(f"Error extracting cell code: {e}")
+                self.nvim.err_write(f"Error extracting cell: {e}\n")
+                return
             
-            # Start web server if not already running
-            if not self.web_server_started:
+            # Now run the async parts with the data we collected
+            try:
+                # Try to get or create event loop
                 try:
-                    await self.web_server.start()
-                    self.web_server_started = True
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Create task in existing loop
+                        task = asyncio.create_task(self._run_cell_async(current_bnum, cell_code))
+                        self.nvim.out_write("Cell execution started in background...\n")
+                        
+                        # Add error callback to the task
+                        def handle_task_exception(task):
+                            if task.exception():
+                                self._logger.error(f"Background task failed: {task.exception()}")
+                                try:
+                                    self.nvim.async_call(lambda: self.nvim.err_write(f"Execution failed: {task.exception()}\n"))
+                                except:
+                                    pass
+                        
+                        task.add_done_callback(handle_task_exception)
+                    else:
+                        # Run in existing loop
+                        self.nvim.out_write("Running in existing event loop...\n")
+                        loop.run_until_complete(self._run_cell_async(current_bnum, cell_code))
+                except RuntimeError:
+                    # No event loop, create one
+                    self.nvim.out_write("Creating new event loop...\n")
+                    asyncio.run(self._run_cell_async(current_bnum, cell_code))
                     
-                    # Show web server info to user
-                    server_url = f"http://{self.web_server.host}:{self.web_server.port}"
+            except Exception as e:
+                self._logger.error(f"Error in async execution: {e}")
+                import traceback
+                self._logger.error(f"Traceback: {traceback.format_exc()}")
+                self.nvim.err_write(f"Execution error: {e}\n")
+                
+        except Exception as e:
+            self._logger.error(f"Error in QuenchRunCell: {e}")
+            import traceback
+            self._logger.error(f"Traceback: {traceback.format_exc()}")
+            self.nvim.err_write(f"Quench error: {e}\n")
+
+    def _extract_cell_code_sync(self, lines, lnum):
+        """
+        Extract cell code synchronously (no async calls).
+        Same logic as ui_manager.get_cell_code but without async.
+        """
+        if not lines:
+            return ""
+
+        # Convert to 0-indexed for Python list access
+        current_line_idx = lnum - 1
+        if current_line_idx >= len(lines):
+            current_line_idx = len(lines) - 1
+
+        # Find the start of the current cell
+        cell_start = 0
+        for i in range(current_line_idx, -1, -1):
+            line = lines[i].strip()
+            if line.startswith('#%%'):
+                if i == current_line_idx:
+                    # If we're on a cell delimiter line, start from the next line
+                    cell_start = i + 1
+                else:
+                    # Found a previous delimiter, start after it
+                    cell_start = i + 1
+                break
+
+        # Find the end of the current cell
+        cell_end = len(lines)
+        for i in range(current_line_idx + 1, len(lines)):
+            line = lines[i].strip()
+            if line.startswith('#%%'):
+                cell_end = i
+                break
+
+        # Extract the cell content
+        cell_lines = lines[cell_start:cell_end]
+        
+        # Remove empty lines at the beginning and end
+        while cell_lines and not cell_lines[0].strip():
+            cell_lines.pop(0)
+        while cell_lines and not cell_lines[-1].strip():
+            cell_lines.pop()
+
+        return '\n'.join(cell_lines)
+
+    async def _run_cell_async(self, current_bnum, cell_code):
+        """
+        Async implementation of cell execution.
+        Takes pre-collected data to avoid Neovim API calls from wrong thread.
+        """
+        self._logger.debug(f"Starting async execution for buffer {current_bnum}")
+        
+        # Start web server if not already running
+        if not self.web_server_started:
+            try:
+                await self.web_server.start()
+                self.web_server_started = True
+                
+                # Show web server info to user (use async_call for thread safety)
+                server_url = f"http://{self.web_server.host}:{self.web_server.port}"
+                def notify_server_started():
                     self.nvim.out_write(f"Quench web server started at {server_url}\n")
-                    
-                except Exception as e:
-                    self._logger.error(f"Failed to start web server: {e}")
+                
+                try:
+                    self.nvim.async_call(notify_server_started)
+                except:
+                    # If async_call fails, just log it
+                    self._logger.info(f"Web server started at {server_url}")
+                
+            except Exception as e:
+                self._logger.error(f"Failed to start web server: {e}")
+                def notify_error():
                     self.nvim.err_write(f"Error starting web server: {e}\n")
-                    # Continue without web server
-            
-            # Get or create kernel session for this buffer
-            session = await self.kernel_manager.get_or_create_session(
-                current_bnum, 
-                self.relay_queue
-            )
-            
-            # Start message relay loop if not running
-            if self.message_relay_task is None or self.message_relay_task.done():
-                self.message_relay_task = asyncio.create_task(self._message_relay_loop())
-                self._logger.info("Started message relay loop")
-            
-            # Execute the code
-            self._logger.info(f"Executing cell code in kernel {session.kernel_id[:8]}")
-            await session.execute(cell_code)
-            
-            # Show execution feedback to user
+                try:
+                    self.nvim.async_call(notify_error)
+                except:
+                    pass
+                # Continue without web server
+        
+        # Get or create kernel session for this buffer
+        # Try to get a meaningful buffer name
+        try:
+            buffer_name = self.nvim.current.buffer.name or f"buffer_{current_bnum}"
+            if buffer_name:
+                # Extract just the filename
+                import os
+                buffer_name = os.path.basename(buffer_name)
+        except:
+            buffer_name = f"buffer_{current_bnum}"
+        
+        session = await self.kernel_manager.get_or_create_session(
+            current_bnum, 
+            self.relay_queue,
+            buffer_name
+        )
+        
+        # Start message relay loop if not running
+        if self.message_relay_task is None or self.message_relay_task.done():
+            self.message_relay_task = asyncio.create_task(self._message_relay_loop())
+            self._logger.info("Started message relay loop")
+        
+        # Execute the code
+        self._logger.info(f"Executing cell code in kernel {session.kernel_id[:8]}")
+        await session.execute(cell_code)
+        
+        # Show execution feedback to user
+        def notify_execution():
             if self.web_server_started:
                 kernel_url = f"http://{self.web_server.host}:{self.web_server.port}?kernel_id={session.kernel_id}"
                 self.nvim.out_write(f"Code executed - view output at: {kernel_url}\n")
             else:
                 self.nvim.out_write("Code executed - check output buffer\n")
-                
-        except Exception as e:
-            self._logger.error(f"Error in QuenchRunCell: {e}")
-            self.nvim.err_write(f"Quench error: {e}\n")
+        
+        try:
+            self.nvim.async_call(notify_execution)
+        except:
+            # If async_call fails, just log it
+            self._logger.info("Code execution completed")
 
     async def _message_relay_loop(self):
         """
@@ -222,14 +358,18 @@ class Quench:
         content = message.get('content', {})
         
         try:
+            # Add debugging for message structure
+            parent_msg_id = message.get('parent_header', {}).get('msg_id', 'none')
+            self._logger.debug(f"Processing message type: {msg_type}, content keys: {list(content.keys()) if content else 'None'}, parent_msg_id: {parent_msg_id}")
+            
             if msg_type == 'stream':
                 # Handle stdout/stderr output
                 stream_name = content.get('name', 'stdout')
                 text = content.get('text', '')
                 
                 if text.strip():
-                    # Write to Neovim command line for immediate feedback
-                    self.nvim.out_write(f"[{stream_name}] {text}")
+                    # Log output instead of writing to Neovim to avoid threading issues
+                    self._logger.info(f"[{kernel_id[:8]}] {stream_name}: {text.strip()}")
                     
             elif msg_type == 'execute_result':
                 # Handle execution results
@@ -240,15 +380,14 @@ class Quench:
                         result_text = '\n'.join(result_text)
                     
                     if result_text.strip():
-                        self.nvim.out_write(f"[result] {result_text}\n")
+                        self._logger.info(f"[{kernel_id[:8]}] Result: {result_text.strip()}")
                         
             elif msg_type == 'error':
                 # Handle errors
                 error_name = content.get('ename', 'Error')
                 error_value = content.get('evalue', '')
                 
-                error_msg = f"[error] {error_name}: {error_value}\n"
-                self.nvim.err_write(error_msg)
+                self._logger.error(f"[{kernel_id[:8]}] Error: {error_name}: {error_value}")
                 
             elif msg_type == 'execute_input':
                 # Show what code was executed
@@ -260,10 +399,17 @@ class Quench:
                     if len(code_lines) > 1:
                         preview += f" ... ({len(code_lines)} lines)"
                     
-                    self.nvim.out_write(f"[executing] {preview}\n")
+                    self._logger.info(f"[{kernel_id[:8]}] Executing: {preview}")
                     
         except Exception as e:
-            self._logger.warning(f"Error handling message for Neovim: {e}")
+            error_msg = str(e) if e else "Unknown error"
+            self._logger.warning(f"Error handling message for Neovim: {error_msg}")
+            
+            # Add detailed debugging
+            import traceback
+            self._logger.debug(f"Exception type: {e.__class__.__name__ if e else 'None'}")
+            self._logger.debug(f"Message structure: {message}")
+            self._logger.debug(f"Exception traceback: {traceback.format_exc()}")
 
     @pynvim.command('QuenchStatus', sync=True)
     def status_command(self):
@@ -331,6 +477,58 @@ class Quench:
         Simple hello world command for testing plugin loading.
         """
         self.nvim.out_write("Hello, world from Quench plugin!\n")
+
+    @pynvim.command('QuenchDebug', sync=True)
+    def debug_command(self):
+        """
+        Debug command to test plugin functionality and show diagnostics.
+        """
+        try:
+            self._logger.info("QuenchDebug called")
+            self.nvim.out_write("=== Quench Debug Info ===\n")
+            
+            # Test logging
+            self.nvim.out_write("✓ Plugin loaded and responding\n")
+            self._logger.info("Debug command executed successfully")
+            
+            # Test buffer access
+            try:
+                current_bnum = self.nvim.current.buffer.number
+                current_line = self.nvim.current.window.cursor[0]
+                self.nvim.out_write(f"✓ Buffer access: buffer {current_bnum}, line {current_line}\n")
+            except Exception as e:
+                self.nvim.out_write(f"✗ Buffer access failed: {e}\n")
+            
+            # Test dependencies
+            try:
+                import jupyter_client
+                self.nvim.out_write("✓ jupyter_client available\n")
+            except ImportError:
+                self.nvim.out_write("✗ jupyter_client not available\n")
+                
+            try:
+                import aiohttp
+                self.nvim.out_write("✓ aiohttp available\n")
+            except ImportError:
+                self.nvim.out_write("✗ aiohttp not available\n")
+            
+            # Test async functionality
+            try:
+                import asyncio
+                self.nvim.out_write("✓ asyncio available\n")
+                try:
+                    loop = asyncio.get_event_loop()
+                    self.nvim.out_write(f"✓ Event loop: {type(loop).__name__}\n")
+                except RuntimeError:
+                    self.nvim.out_write("✗ No event loop found\n")
+            except Exception as e:
+                self.nvim.out_write(f"✗ Asyncio test failed: {e}\n")
+                
+            self.nvim.out_write("=== End Debug Info ===\n")
+            
+        except Exception as e:
+            self._logger.error(f"Error in QuenchDebug: {e}")
+            self.nvim.err_write(f"Debug error: {e}\n")
 
     @pynvim.function('SayHello', sync=True)
     def say_hello_function(self, args):

@@ -16,12 +16,19 @@ The current repository contains a basic template structure with a simple "HelloW
 ## Development Commands
 
 ### Testing
-- `make test` - Run the full test suite (configured in CI)
-- The project uses plenary.nvim and busted for testing framework
+- `pytest tests/` - Run the full test suite
+- `pytest tests/test_unit.py` - Run unit tests only
+- `pytest tests/test_quench_main.py` - Run main plugin integration tests
+- `pytest tests/test_integration.py` - Run integration tests
+- `pytest -v` - Run tests with verbose output
+- `pytest -k "test_name"` - Run specific test by name
+- The project uses pytest with async support and dependency detection
 
 ### Code Formatting
 - `stylua --color always --check lua` - Check Lua code formatting
-- `stylua lua` - Format Lua code (use .stylua.toml configuration)
+- `stylua lua` - Format Lua code (uses .stylua.toml configuration with 120 column width)
+- `black rplugin/python3/quench/` - Format Python code
+- `flake8 rplugin/python3/quench/` - Check Python code style
 
 ### Plugin Development
 - Plugin files go in `rplugin/python3/quench/`
@@ -31,9 +38,16 @@ The current repository contains a basic template structure with a simple "HelloW
 ## Code Architecture
 
 ### Current State
-- Basic pynvim plugin template with HelloWorld command
-- Template structure from ellisonleao/nvim-plugin-template
-- No implementation of the core quench functionality yet
+- **FULLY IMPLEMENTED** - All core Quench functionality is complete and working
+- Main plugin class in `rplugin/python3/quench/__init__.py` with async commands:
+  - `QuenchRunCell` - Execute Python cells with `#%%` delimiters
+  - `QuenchStatus` - Display plugin status and active sessions
+  - `QuenchStop` - Stop all plugin components
+  - `HelloWorld` - Basic connectivity test (kept for backward compatibility)
+- Complete kernel session management with IPython integration
+- Web server with WebSocket relay for rich media output
+- UI manager for Neovim API interactions
+- Frontend HTML/JS application for browser-based output display
 
 ### Planned Architecture (from specification)
 - **KernelSession**: Individual IPython kernel management with asyncio
@@ -51,28 +65,58 @@ The current repository contains a basic template structure with a simple "HelloW
 ### Plugin Structure
 ```
 rplugin/python3/quench/
-├── __init__.py          # Main plugin class and pynvim integration
-├── kernel_session.py    # (planned) Kernel management
-├── web_server.py        # (planned) Web server and WebSocket handling
-├── ui_manager.py        # (planned) Neovim API wrapper
-└── frontend/            # (planned) Web frontend files
+├── __init__.py          # Main plugin class and pynvim integration (343 lines)
+├── kernel_session.py    # IPython kernel management (285 lines)
+├── web_server.py        # Web server and WebSocket handling (304 lines) 
+├── ui_manager.py        # Neovim API wrapper (174 lines)
+└── frontend/            # Web frontend files
+    ├── index.html       # Browser interface layout
+    └── main.js          # WebSocket client and output rendering
 ```
 
 ## Testing Strategy
 
-The specification outlines a comprehensive testing approach:
-- Unit tests with pytest for individual components
-- Integration tests with embedded Neovim instances
-- WebSocket client tests for server communication
-- Mock-based testing for kernel management without processes
+**43 tests implemented** with comprehensive coverage:
+- **Unit tests** (`tests/test_unit.py`) - 19 tests for NvimUIManager functionality
+- **Plugin integration tests** (`tests/test_quench_main.py`) - 18 tests for main plugin class  
+- **Integration tests** (`tests/test_integration.py`) - 6 tests for component interaction
+- **Dependency detection** - Tests auto-skip when optional dependencies missing
+- **Async support** - Full pytest-asyncio integration for testing async functionality
+- **Mock-based testing** - Comprehensive mocking for kernel management without processes
+- **Custom markers** - `@pytest.mark.integration`, `@pytest.mark.requires_nvim`, etc.
 
 ## Dependencies
 
-Current dependencies:
-- pynvim for Neovim integration
-- Standard library asyncio for async operations
+**Required dependencies:**
+- `pynvim` - Neovim integration (required for plugin functionality)
+- `jupyter_client` - IPython kernel management (required for code execution)
 
-Planned dependencies (from specification):
-- jupyter-client for IPython kernel management
-- aiohttp for web server
-- Various frontend libraries for rich media rendering
+**Optional dependencies** (graceful fallback if not available):
+- `aiohttp` - Web server and WebSocket functionality
+- `websockets` - Enhanced WebSocket support
+- `matplotlib`, `pandas`, `IPython` - Enhanced rich output support
+
+**Development dependencies:**
+- `pytest>=7.0.0` - Test framework  
+- `pytest-asyncio>=0.21.0` - Async test support
+- `pytest-mock>=3.10.0` - Advanced mocking capabilities
+- `pytest-cov>=4.0.0` - Coverage reporting
+- `black>=22.0.0` - Code formatting
+- `flake8>=5.0.0` - Code style checking
+
+## Key Implementation Details
+
+### Logging
+- Logs written to `/tmp/quench.log` with INFO level
+- Component-specific loggers: `quench.main`, `quench.kernel.{kernel_id}`, `quench.web_server`, `quench.kernel_manager`
+
+### Error Handling
+- Graceful degradation when optional dependencies missing
+- Comprehensive exception handling with logging
+- Resource cleanup on plugin shutdown via `VimLeave` autocmd
+
+### Web Server Integration  
+- Default server: `http://127.0.0.1:8765`
+- WebSocket endpoints: `/ws/{kernel_id}` for real-time output
+- Static file serving for frontend assets
+- Cell-based output correlation using Jupyter message IDs

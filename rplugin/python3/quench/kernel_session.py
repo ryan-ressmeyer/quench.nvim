@@ -4,12 +4,13 @@ import logging
 from typing import Optional, Dict, Set
 
 try:
-    from jupyter_client import AsyncKernelManager
-    from jupyter_client.asyncioclient import AsyncKernelClient
+    from jupyter_client import AsyncKernelManager, AsyncKernelClient
+    JUPYTER_CLIENT_AVAILABLE = True
 except ImportError:
     # Graceful fallback if jupyter_client is not installed
     AsyncKernelManager = None
     AsyncKernelClient = None
+    JUPYTER_CLIENT_AVAILABLE = False
 
 
 class KernelSession:
@@ -17,12 +18,13 @@ class KernelSession:
     Represents a single, running IPython kernel and its associated state.
     """
 
-    def __init__(self, relay_queue: asyncio.Queue):
+    def __init__(self, relay_queue: asyncio.Queue, buffer_name: str = None):
         """
         Initialize a new kernel session.
 
         Args:
             relay_queue: The central asyncio.Queue for broadcasting messages
+            buffer_name: Optional human-readable name for the session
         """
         self.kernel_id: str = str(uuid.uuid4())
         self.km: Optional[AsyncKernelManager] = None
@@ -31,25 +33,28 @@ class KernelSession:
         self.relay_queue: asyncio.Queue = relay_queue
         self.associated_buffers: Set[int] = set()
         self.listener_task: Optional[asyncio.Task] = None
+        self.buffer_name = buffer_name or f"kernel_{self.kernel_id[:8]}"
+        self.created_at = __import__('datetime').datetime.now()
         self._logger = logging.getLogger(f"quench.kernel.{self.kernel_id[:8]}")
 
     async def start(self):
         """
         Start the kernel and establish communication channels.
         """
-        if AsyncKernelManager is None:
-            raise RuntimeError("jupyter_client is not installed. Please install it to use kernel functionality.")
+        if not JUPYTER_CLIENT_AVAILABLE:
+            self._logger.error("jupyter_client import failed - AsyncKernelManager/AsyncKernelClient not available")
+            raise RuntimeError("jupyter_client is not installed or imports failed. Please install it to use kernel functionality.")
 
         try:
             # Create and start the kernel manager
             self.km = AsyncKernelManager(kernel_name='python3')
-            await self.km.start_kernel()
+            await self.km.start_kernel()  # This IS async in jupyter_client 8.x
 
             # Create the client and start channels
             self.client = self.km.client()
-            await self.client.start_channels()
+            self.client.start_channels()  # This is synchronous
 
-            # Wait for the client to be fully ready
+            # Wait for the client to be fully ready (this IS async)
             await self.client.wait_for_ready(timeout=30)
 
             # Start the IOPub listener task
@@ -86,7 +91,7 @@ class KernelSession:
         # Shutdown the kernel
         if self.km:
             try:
-                await self.km.shutdown_kernel()
+                await self.km.shutdown_kernel()  # This is also async in jupyter_client 8.x
             except Exception as e:
                 self._logger.warning(f"Error shutting down kernel: {e}")
 
@@ -109,6 +114,44 @@ class KernelSession:
             # Send the code for execution
             msg_id = self.client.execute(code)
             self._logger.debug(f"Executed code in kernel {self.kernel_id[:8]}, msg_id: {msg_id}")
+            
+            # Create a synthetic execute_input message for the frontend using the actual execute request ID
+            # This ensures the frontend has a cell to attach output to, using the same ID that output messages will reference
+            from datetime import datetime, timezone
+            execute_input_msg = {
+                'header': {
+                    'msg_id': f"synthetic_{msg_id}",  # Use a different ID for the execute_input message itself
+                    'msg_type': 'execute_input',
+                    'username': 'quench',
+                    'session': self.kernel_id,
+                    'date': datetime.now(timezone.utc),
+                    'version': '5.3'
+                },
+                'msg_id': f"synthetic_{msg_id}",
+                'msg_type': 'execute_input',
+                'parent_header': {
+                    'msg_id': msg_id,  # This is the key - output messages will reference this ID
+                    'msg_type': 'execute_request',
+                    'username': 'quench',
+                    'session': self.kernel_id,
+                    'date': datetime.now(timezone.utc),
+                    'version': '5.3'
+                },
+                'metadata': {},
+                'content': {
+                    'code': code,
+                    'execution_count': None
+                },
+                'buffers': []
+            }
+            
+            self._logger.debug(f"Creating synthetic execute_input with parent_msg_id: {msg_id}")
+            
+            # Add to cache and relay immediately
+            self.output_cache.append(execute_input_msg)
+            await self.relay_queue.put((self.kernel_id, execute_input_msg))
+            self._logger.debug(f"Created synthetic execute_input message for kernel {self.kernel_id[:8]}")
+            
             return msg_id
         except Exception as e:
             self._logger.error(f"Error executing code in kernel {self.kernel_id[:8]}: {e}")
@@ -130,6 +173,12 @@ class KernelSession:
                     # Wait for messages from the IOPub channel
                     message = await self.client.get_iopub_msg(timeout=1.0)
                     
+                    # Skip execute_input messages since we create our own synthetic ones
+                    # This prevents duplicate cells in the frontend
+                    if message.get('msg_type') == 'execute_input':
+                        self._logger.debug(f"Skipping real execute_input message from kernel {self.kernel_id[:8]}")
+                        continue
+                    
                     # Append to output cache
                     self.output_cache.append(message)
                     
@@ -143,7 +192,18 @@ class KernelSession:
                     continue
                 except Exception as e:
                     # Log other errors but continue listening
-                    self._logger.warning(f"Error receiving IOPub message from kernel {self.kernel_id[:8]}: {e}")
+                    error_msg = str(e) if e else "Unknown error"
+                    
+                    # Don't spam logs with Empty exceptions - they're normal timeouts
+                    if "Empty" not in error_msg and e.__class__.__name__ != 'Empty':
+                        self._logger.warning(f"Error receiving IOPub message from kernel {self.kernel_id[:8]}: {error_msg}")
+                        
+                        # Add more detailed error info for non-Empty errors
+                        if hasattr(e, '__class__'):
+                            self._logger.debug(f"Exception type: {e.__class__.__name__}")
+                        
+                        import traceback
+                        self._logger.debug(f"Exception traceback: {traceback.format_exc()}")
                     continue
 
         except asyncio.CancelledError:
@@ -175,13 +235,14 @@ class KernelSessionManager:
             self._logger = logging.getLogger("quench.kernel_manager")
             KernelSessionManager._initialized = True
 
-    async def get_or_create_session(self, bnum: int, relay_queue: asyncio.Queue) -> KernelSession:
+    async def get_or_create_session(self, bnum: int, relay_queue: asyncio.Queue, buffer_name: str = None) -> KernelSession:
         """
         Get an existing session for a buffer or create a new one.
 
         Args:
             bnum: Buffer number
             relay_queue: The central message relay queue
+            buffer_name: Optional human-readable name for the session
 
         Returns:
             KernelSession: The session associated with the buffer
@@ -193,8 +254,8 @@ class KernelSessionManager:
                 self._logger.debug(f"Returning existing session for buffer {bnum}")
                 return self.sessions[kernel_id]
 
-        # Create a new session
-        session = KernelSession(relay_queue)
+        # Create a new session with buffer name
+        session = KernelSession(relay_queue, buffer_name)
         
         try:
             await session.start()
@@ -204,7 +265,7 @@ class KernelSessionManager:
             self.buffer_to_kernel_map[bnum] = session.kernel_id
             session.associated_buffers.add(bnum)
             
-            self._logger.info(f"Created new session {session.kernel_id[:8]} for buffer {bnum}")
+            self._logger.info(f"Created new session {session.kernel_id[:8]} ({session.buffer_name}) for buffer {bnum}")
             return session
             
         except Exception as e:
@@ -278,6 +339,9 @@ class KernelSessionManager:
         for kernel_id, session in self.sessions.items():
             result[kernel_id] = {
                 'kernel_id': kernel_id,
+                'name': session.buffer_name,
+                'short_id': kernel_id[:8],
+                'created_at': session.created_at.isoformat() if hasattr(session, 'created_at') else None,
                 'associated_buffers': list(session.associated_buffers),
                 'output_cache_size': len(session.output_cache),
                 'is_alive': session.listener_task is not None and not session.listener_task.done()

@@ -40,10 +40,21 @@ class NvimUIManager:
         """
         # Get the buffer by number
         buffer = None
-        for buf in self.nvim.buffers:
-            if buf.number == bnum:
-                buffer = buf
-                break
+        try:
+            # Try to access buffers property
+            if hasattr(self.nvim, 'buffers'):
+                for buf in self.nvim.buffers:
+                    if buf.number == bnum:
+                        buffer = buf
+                        break
+            else:
+                # If we can't find the specific buffer, use current buffer if it matches
+                current_buf = self.nvim.current.buffer
+                if current_buf.number == bnum:
+                    buffer = current_buf
+        except AttributeError:
+            # Fallback to current buffer
+            buffer = self.nvim.current.buffer
         
         if buffer is None:
             return ""
@@ -119,10 +130,21 @@ class NvimUIManager:
         """
         # Find the buffer by number
         buffer = None
-        for buf in self.nvim.buffers:
-            if buf.number == bnum:
-                buffer = buf
-                break
+        try:
+            # Try to access buffers property
+            if hasattr(self.nvim, 'buffers'):
+                for buf in self.nvim.buffers:
+                    if buf.number == bnum:
+                        buffer = buf
+                        break
+            else:
+                # If we can't find the specific buffer, use current buffer if it matches
+                current_buf = self.nvim.current.buffer
+                if current_buf.number == bnum:
+                    buffer = current_buf
+        except AttributeError:
+            # Fallback to current buffer
+            buffer = self.nvim.current.buffer
         
         if buffer is None:
             return

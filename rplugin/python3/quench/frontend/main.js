@@ -6,6 +6,8 @@ class QuenchClient {
         this.outputArea = null;
         this.statusElement = null;
         this.kernelIdElement = null;
+        this.kernelSelect = null;
+        this.refreshButton = null;
         
         this.init();
     }
@@ -15,20 +17,72 @@ class QuenchClient {
         this.outputArea = document.getElementById('output-area');
         this.statusElement = document.getElementById('connection-status');
         this.kernelIdElement = document.getElementById('kernel-id');
+        this.kernelSelect = document.getElementById('kernel-select');
+        this.refreshButton = document.getElementById('refresh-kernels');
         
-        // Extract kernel ID from URL parameters
-        this.kernelId = this.getKernelIdFromUrl();
+        // Set up event handlers
+        this.kernelSelect.addEventListener('change', () => this.onKernelSelected());
+        this.refreshButton.addEventListener('click', () => this.loadKernels());
         
-        if (!this.kernelId) {
-            this.showError('No kernel_id provided in URL parameters. Expected format: ?kernel_id=xxx');
+        // Load available kernels
+        this.loadKernels();
+        
+        // Also check URL for kernel_id (backward compatibility)
+        const urlKernelId = this.getKernelIdFromUrl();
+        if (urlKernelId) {
+            setTimeout(() => this.selectKernel(urlKernelId), 500);
+        }
+    }
+
+    async loadKernels() {
+        try {
+            this.kernelSelect.innerHTML = '<option value="">Loading kernels...</option>';
+            
+            const response = await fetch('/api/sessions');
+            const data = await response.json();
+            
+            this.kernelSelect.innerHTML = '<option value="">Select a kernel...</option>';
+            
+            if (data.sessions && Object.keys(data.sessions).length > 0) {
+                Object.values(data.sessions).forEach(session => {
+                    const option = document.createElement('option');
+                    option.value = session.kernel_id;
+                    option.textContent = `${session.name} (${session.short_id}) - ${session.is_alive ? 'Active' : 'Inactive'}`;
+                    this.kernelSelect.appendChild(option);
+                });
+            } else {
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = 'No kernels available - run :QuenchRunCell in Neovim';
+                this.kernelSelect.appendChild(option);
+            }
+        } catch (error) {
+            console.error('Failed to load kernels:', error);
+            this.kernelSelect.innerHTML = '<option value="">Error loading kernels</option>';
+        }
+    }
+
+    selectKernel(kernelId) {
+        this.kernelSelect.value = kernelId;
+        this.onKernelSelected();
+    }
+
+    onKernelSelected() {
+        const selectedKernelId = this.kernelSelect.value;
+        
+        if (!selectedKernelId) {
+            this.disconnect();
+            this.kernelIdElement.textContent = 'None';
+            this.updateStatus('Select a kernel to connect...', 'disconnected');
             return;
         }
         
-        // Update UI with kernel ID
-        this.kernelIdElement.textContent = this.kernelId;
-        
-        // Establish WebSocket connection
-        this.connect();
+        if (selectedKernelId !== this.kernelId) {
+            this.kernelId = selectedKernelId;
+            this.kernelIdElement.textContent = selectedKernelId;
+            this.clearOutput();
+            this.connect();
+        }
     }
 
     getKernelIdFromUrl() {
@@ -37,10 +91,19 @@ class QuenchClient {
     }
 
     connect() {
+        if (!this.kernelId) {
+            this.updateStatus('No kernel selected', 'disconnected');
+            return;
+        }
+
+        // Close existing connection
+        this.disconnect();
+
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws/${this.kernelId}`;
         
         console.log(`Connecting to WebSocket: ${wsUrl}`);
+        this.updateStatus('Connecting...', 'disconnected');
         
         try {
             this.ws = new WebSocket(wsUrl);
@@ -51,6 +114,20 @@ class QuenchClient {
         }
     }
 
+    disconnect() {
+        if (this.ws) {
+            this.ws.close();
+            this.ws = null;
+        }
+    }
+
+    clearOutput() {
+        // Clear all cells except header
+        const cells = this.outputArea.querySelectorAll('.cell');
+        cells.forEach(cell => cell.remove());
+        this.cells.clear();
+    }
+
     setupWebSocketHandlers() {
         this.ws.onopen = (event) => {
             console.log('WebSocket connection opened');
@@ -58,8 +135,10 @@ class QuenchClient {
         };
 
         this.ws.onmessage = (event) => {
+            console.log('Raw WebSocket message received:', event.data);
             try {
                 const message = JSON.parse(event.data);
+                console.log('Parsed WebSocket message:', message);
                 this.handleMessage(message);
             } catch (error) {
                 console.error('Failed to parse WebSocket message:', error, event.data);
@@ -69,14 +148,6 @@ class QuenchClient {
         this.ws.onclose = (event) => {
             console.log('WebSocket connection closed:', event.code, event.reason);
             this.updateStatus('Connection closed', 'disconnected');
-            
-            // Attempt to reconnect after a delay
-            setTimeout(() => {
-                if (this.ws.readyState === WebSocket.CLOSED) {
-                    console.log('Attempting to reconnect...');
-                    this.connect();
-                }
-            }, 3000);
         };
 
         this.ws.onerror = (event) => {
@@ -90,14 +161,16 @@ class QuenchClient {
         const msgId = message.header?.msg_id;
         const parentMsgId = message.parent_header?.msg_id;
         
-        console.log(`Received message: ${msgType}`, message);
+        console.log(`Received message: ${msgType} (msg_id: ${msgId?.slice(0,8)}, parent: ${parentMsgId?.slice(0,8)})`);
         
         switch (msgType) {
             case 'execute_input':
+                console.log('Processing execute_input message');
                 this.handleExecuteInput(message);
                 break;
                 
             case 'stream':
+                console.log('Processing stream message, current cells:', Array.from(this.cells.keys()).map(k => k.slice(0,8)));
                 this.handleStream(message);
                 break;
                 
@@ -121,24 +194,44 @@ class QuenchClient {
 
     handleExecuteInput(message) {
         const msgId = message.header.msg_id;
+        const parentMsgId = message.parent_header?.msg_id;
         const code = message.content?.code || '';
         
-        // Create a new cell for this execution
-        const cellElement = this.createCell(msgId, code);
-        this.cells.set(msgId, cellElement);
+        console.log(`Execute input: msg_id=${msgId?.slice(0,8)}, parent=${parentMsgId?.slice(0,8)}, code length=${code.length}`);
         
-        // Add to the output area
-        this.outputArea.appendChild(cellElement);
-        
-        // Scroll to the new cell
-        cellElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // The execute_input message's parent_header.msg_id is the original execute request ID
+        // This is what all output messages (stream, result, etc.) will reference
+        if (parentMsgId) {
+            console.log(`Creating cell with ID: ${parentMsgId.slice(0,8)}`);
+            const cellElement = this.createCell(parentMsgId, code);
+            this.cells.set(parentMsgId, cellElement);
+            
+            console.log(`Cell created, total cells: ${this.cells.size}`);
+            
+            // Add to the output area
+            this.outputArea.appendChild(cellElement);
+            
+            // Scroll to the new cell
+            cellElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else {
+            console.warn('Execute input message without parent_header.msg_id:', message);
+        }
     }
 
     handleStream(message) {
         const parentMsgId = message.parent_header?.msg_id;
-        if (!parentMsgId || !this.cells.has(parentMsgId)) {
-            console.warn('Stream message without valid parent cell:', message);
+        if (!parentMsgId) {
+            console.warn('Stream message without parent_header.msg_id:', message);
             return;
+        }
+        
+        // Create a cell on-demand if one doesn't exist for this parent message ID
+        if (!this.cells.has(parentMsgId)) {
+            console.log(`Creating on-demand cell for orphaned stream message: ${parentMsgId.slice(0,8)}`);
+            const cellElement = this.createCell(parentMsgId, '# Code executed previously');
+            this.cells.set(parentMsgId, cellElement);
+            this.outputArea.appendChild(cellElement);
+            console.log(`Cell created for stream, total cells: ${this.cells.size}`);
         }
         
         const cell = this.cells.get(parentMsgId);
@@ -174,9 +267,17 @@ class QuenchClient {
 
     handleDisplayData(message) {
         const parentMsgId = message.parent_header?.msg_id;
-        if (!parentMsgId || !this.cells.has(parentMsgId)) {
-            console.warn('Display data message without valid parent cell:', message);
+        if (!parentMsgId) {
+            console.warn('Display data message without parent_header.msg_id:', message);
             return;
+        }
+        
+        // Create a cell on-demand if one doesn't exist for this parent message ID
+        if (!this.cells.has(parentMsgId)) {
+            console.log(`Creating on-demand cell for orphaned display data message: ${parentMsgId.slice(0,8)}`);
+            const cellElement = this.createCell(parentMsgId, '# Code executed previously');
+            this.cells.set(parentMsgId, cellElement);
+            this.outputArea.appendChild(cellElement);
         }
         
         const cell = this.cells.get(parentMsgId);
@@ -191,9 +292,17 @@ class QuenchClient {
 
     handleError(message) {
         const parentMsgId = message.parent_header?.msg_id;
-        if (!parentMsgId || !this.cells.has(parentMsgId)) {
-            console.warn('Error message without valid parent cell:', message);
+        if (!parentMsgId) {
+            console.warn('Error message without parent_header.msg_id:', message);
             return;
+        }
+        
+        // Create a cell on-demand if one doesn't exist for this parent message ID
+        if (!this.cells.has(parentMsgId)) {
+            console.log(`Creating on-demand cell for orphaned error message: ${parentMsgId.slice(0,8)}`);
+            const cellElement = this.createCell(parentMsgId, '# Code executed previously');
+            this.cells.set(parentMsgId, cellElement);
+            this.outputArea.appendChild(cellElement);
         }
         
         const cell = this.cells.get(parentMsgId);
@@ -206,8 +315,14 @@ class QuenchClient {
         const errorValue = message.content?.evalue || '';
         const traceback = message.content?.traceback || [];
         
-        const errorText = `${errorName}: ${errorValue}\n${traceback.join('\n')}`;
-        errorDiv.textContent = errorText;
+        // Clean up ANSI escape codes from traceback
+        const cleanTraceback = traceback.map(line => this.stripAnsiCodes(line));
+        const errorText = `${errorName}: ${errorValue}\n${cleanTraceback.join('\n')}`;
+        
+        const errorPre = document.createElement('pre');
+        errorPre.className = 'output-text';
+        errorPre.textContent = errorText;
+        errorDiv.appendChild(errorPre);
         
         outputDiv.appendChild(errorDiv);
     }
@@ -330,6 +445,12 @@ class QuenchClient {
                 container.appendChild(textDiv);
                 break;
         }
+    }
+
+    stripAnsiCodes(text) {
+        // Remove ANSI escape codes (colors, formatting, etc.)
+        // This regex matches ANSI escape sequences
+        return text.replace(/\x1b\[[0-9;]*m/g, '');
     }
 
     updateStatus(message, status) {

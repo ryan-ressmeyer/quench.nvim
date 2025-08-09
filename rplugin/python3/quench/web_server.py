@@ -2,6 +2,7 @@ import asyncio
 import logging
 import json
 import os
+from datetime import datetime
 from typing import Dict, Set, Optional
 from pathlib import Path
 
@@ -13,6 +14,15 @@ except ImportError:
     web = None
     WSMsgType = None
     WebSocketResponse = None
+
+
+class DateTimeEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles datetime objects."""
+    
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
 
 
 class WebServer:
@@ -54,6 +64,7 @@ class WebServer:
             
             # Add routes
             self.app.router.add_get('/', self._handle_index)
+            self.app.router.add_get('/api/sessions', self._handle_sessions_api)
             self.app.router.add_get('/ws/{kernel_id}', self._handle_websocket)
             self.app.router.add_static('/static/', path=self._get_frontend_path(), name='static')
 
@@ -149,6 +160,27 @@ class WebServer:
             self._logger.error(f"Error serving index page: {e}")
             return web.Response(text="Internal Server Error", status=500)
 
+    async def _handle_sessions_api(self, request):
+        """
+        Handle API requests for listing available kernel sessions.
+        
+        Returns:
+            web.Response: JSON response with session information
+        """
+        try:
+            if not self.kernel_manager:
+                return web.json_response({"error": "No kernel manager available"}, status=500)
+            
+            sessions = self.kernel_manager.list_sessions()
+            return web.json_response({
+                "sessions": sessions,
+                "count": len(sessions)
+            })
+            
+        except Exception as e:
+            self._logger.error(f"Error in sessions API: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+
     async def _handle_websocket(self, request):
         """
         Handle WebSocket connections for relaying kernel output.
@@ -179,13 +211,16 @@ class WebServer:
 
         # Look for the session by kernel_id
         session = None
+        available_sessions = list(self.kernel_manager.sessions.keys())
+        self._logger.debug(f"Looking for kernel_id '{kernel_id}', available sessions: {available_sessions}")
+        
         for session_id, kernel_session in self.kernel_manager.sessions.items():
             if session_id == kernel_id:
                 session = kernel_session
                 break
 
         if not session:
-            self._logger.warning(f"No kernel session found for kernel_id: {kernel_id}")
+            self._logger.warning(f"No kernel session found for kernel_id: {kernel_id} (available: {available_sessions})")
             return web.Response(text=f"Kernel session {kernel_id} not found", status=404)
 
         # Prepare the WebSocket response
@@ -198,7 +233,7 @@ class WebServer:
             # Send the entire output_cache to the new client
             for message in session.output_cache:
                 try:
-                    await ws.send_json(message)
+                    await ws.send_str(json.dumps(message, cls=DateTimeEncoder))
                 except Exception as e:
                     self._logger.warning(f"Failed to send cached message to client: {e}")
                     break
@@ -262,7 +297,7 @@ class WebServer:
                     self.active_connections[kernel_id].discard(ws)
                     continue
                     
-                await ws.send_json(message)
+                await ws.send_str(json.dumps(message, cls=DateTimeEncoder))
                 self._logger.debug(f"Broadcasted message to WebSocket client for kernel {kernel_id[:8]}")
                 
             except Exception as e:
