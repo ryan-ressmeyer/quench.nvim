@@ -1,7 +1,10 @@
 import asyncio
 import uuid
 import logging
-from typing import Optional, Dict, Set
+import json
+import sys
+import subprocess
+from typing import Optional, Dict, Set, List
 
 try:
     from jupyter_client import AsyncKernelManager, AsyncKernelClient
@@ -18,13 +21,14 @@ class KernelSession:
     Represents a single, running IPython kernel and its associated state.
     """
 
-    def __init__(self, relay_queue: asyncio.Queue, buffer_name: str = None):
+    def __init__(self, relay_queue: asyncio.Queue, buffer_name: str = None, kernel_name: str = None):
         """
         Initialize a new kernel session.
 
         Args:
             relay_queue: The central asyncio.Queue for broadcasting messages
             buffer_name: Optional human-readable name for the session
+            kernel_name: Optional kernel name to use (defaults to 'python3')
         """
         self.kernel_id: str = str(uuid.uuid4())
         self.km: Optional[AsyncKernelManager] = None
@@ -34,20 +38,27 @@ class KernelSession:
         self.associated_buffers: Set[int] = set()
         self.listener_task: Optional[asyncio.Task] = None
         self.buffer_name = buffer_name or f"kernel_{self.kernel_id[:8]}"
+        self.kernel_name = kernel_name or 'python3'
         self.created_at = __import__('datetime').datetime.now()
         self._logger = logging.getLogger(f"quench.kernel.{self.kernel_id[:8]}")
 
-    async def start(self):
+    async def start(self, kernel_name: str = None):
         """
         Start the kernel and establish communication channels.
+        
+        Args:
+            kernel_name: Optional kernel name to override the instance default
         """
         if not JUPYTER_CLIENT_AVAILABLE:
             self._logger.error("jupyter_client import failed - AsyncKernelManager/AsyncKernelClient not available")
             raise RuntimeError("jupyter_client is not installed or imports failed. Please install it to use kernel functionality.")
 
         try:
+            # Use provided kernel_name or fall back to instance default
+            effective_kernel_name = kernel_name or self.kernel_name
+            
             # Create and start the kernel manager
-            self.km = AsyncKernelManager(kernel_name='python3')
+            self.km = AsyncKernelManager(kernel_name=effective_kernel_name)
             await self.km.start_kernel()  # This IS async in jupyter_client 8.x
 
             # Create the client and start channels
@@ -60,7 +71,7 @@ class KernelSession:
             # Start the IOPub listener task
             self.listener_task = asyncio.create_task(self._listen_iopub())
             
-            self._logger.info(f"Kernel {self.kernel_id[:8]} started successfully")
+            self._logger.info(f"Kernel {self.kernel_id[:8]} (type: {effective_kernel_name}) started successfully")
 
         except Exception as e:
             self._logger.error(f"Failed to start kernel {self.kernel_id[:8]}: {e}")
@@ -235,7 +246,7 @@ class KernelSessionManager:
             self._logger = logging.getLogger("quench.kernel_manager")
             KernelSessionManager._initialized = True
 
-    async def get_or_create_session(self, bnum: int, relay_queue: asyncio.Queue, buffer_name: str = None) -> KernelSession:
+    async def get_or_create_session(self, bnum: int, relay_queue: asyncio.Queue, buffer_name: str = None, kernel_name: str = None) -> KernelSession:
         """
         Get an existing session for a buffer or create a new one.
 
@@ -243,6 +254,7 @@ class KernelSessionManager:
             bnum: Buffer number
             relay_queue: The central message relay queue
             buffer_name: Optional human-readable name for the session
+            kernel_name: Optional kernel name to use (defaults to 'python3')
 
         Returns:
             KernelSession: The session associated with the buffer
@@ -254,8 +266,8 @@ class KernelSessionManager:
                 self._logger.debug(f"Returning existing session for buffer {bnum}")
                 return self.sessions[kernel_id]
 
-        # Create a new session with buffer name
-        session = KernelSession(relay_queue, buffer_name)
+        # Create a new session with buffer name and kernel name
+        session = KernelSession(relay_queue, buffer_name, kernel_name)
         
         try:
             await session.start()
@@ -347,3 +359,48 @@ class KernelSessionManager:
                 'is_alive': session.listener_task is not None and not session.listener_task.done()
             }
         return result
+
+    async def discover_kernelspecs(self) -> List[Dict[str, str]]:
+        """
+        Discover all available kernel specifications on the system.
+
+        Returns:
+            List[Dict]: List of kernel specifications, each containing:
+                - name: Internal kernel name
+                - display_name: Human-readable name
+                - argv: Command line arguments for starting the kernel
+        """
+        kernelspecs = []
+        
+        try:
+            # Use jupyter_client to discover kernels instead of subprocess
+            from jupyter_client.kernelspec import KernelSpecManager
+            ksm = KernelSpecManager()
+            available_kernels = ksm.find_kernel_specs()
+            
+            # Get kernel specs for each available kernel
+            for kernel_name in available_kernels.keys():
+                try:
+                    spec = ksm.get_kernel_spec(kernel_name)
+                    kernelspecs.append({
+                        'name': kernel_name,
+                        'display_name': spec.display_name,
+                        'argv': spec.argv
+                    })
+                except Exception as e:
+                    self._logger.warning(f"Failed to get spec for kernel {kernel_name}: {e}")
+                    continue
+        
+        except Exception as e:
+            self._logger.error(f"Failed to discover kernels using jupyter_client: {e}")
+            self._logger.error("Please ensure jupyter_client is installed: pip install jupyter_client")
+            raise
+        
+        self._logger.info(f"Discovered {len(kernelspecs)} kernel specifications")
+        
+        # If no kernels found, log a helpful message
+        if not kernelspecs:
+            self._logger.warning("No Jupyter kernel specifications found. Make sure ipykernel is installed.")
+            self._logger.info("To install: pip install ipykernel && python -m ipykernel install --user")
+        
+        return kernelspecs

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 logging.basicConfig(filename="/tmp/quench.log", level=logging.DEBUG)
+import re
 from typing import Optional
 
 import pynvim
@@ -39,8 +40,8 @@ class Quench:
         self.kernel_manager = KernelSessionManager()
         self.ui_manager = NvimUIManager(nvim)
         self.web_server = WebServer(
-            host="127.0.0.1", 
-            port=8765, 
+            host=self._get_web_server_host(), 
+            port=self._get_web_server_port(), 
             nvim=nvim,
             kernel_manager=self.kernel_manager
         )
@@ -50,6 +51,47 @@ class Quench:
         self.web_server_started = False
         
         self._logger.info("Quench plugin initialized")
+
+    def _get_cell_delimiter(self):
+        """
+        Get the cell delimiter pattern from Neovim global variable.
+        
+        Returns:
+            str: The regex pattern for cell delimiters, defaults to '^#+\\s*%%' if not set.
+                 This matches one or more '#' characters followed by optional spaces and '%%'.
+        """
+        try:
+            delimiter = self.nvim.vars.get('quench_nvim_cell_delimiter', r'^#+\s*%%')
+            return delimiter
+        except Exception:
+            self._logger.warning("Failed to get custom cell delimiter, using default '^#+\\s*%%'")
+            return r'^#+\s*%%'
+    
+    def _get_web_server_host(self):
+        """
+        Get the web server host from Neovim global variable.
+        
+        Returns:
+            str: The host address for the web server, defaults to '127.0.0.1' if not set.
+        """
+        try:
+            return self.nvim.vars.get('quench_nvim_web_server_host', '127.0.0.1')
+        except Exception as e:
+            self._logger.warning(f"Error getting web server host from Neovim variable: {e}")
+            return '127.0.0.1'
+    
+    def _get_web_server_port(self):
+        """
+        Get the web server port from Neovim global variable.
+        
+        Returns:
+            int: The port number for the web server, defaults to 8765 if not set.
+        """
+        try:
+            return self.nvim.vars.get('quench_nvim_web_server_port', 8765)
+        except Exception as e:
+            self._logger.warning(f"Error getting web server port from Neovim variable: {e}")
+            return 8765
 
     @pynvim.autocmd("VimLeave", sync=True)
     def on_vim_leave(self):
@@ -134,7 +176,8 @@ class Quench:
             
             # Extract cell code synchronously
             try:
-                cell_code = self._extract_cell_code_sync(lines, current_line)
+                delimiter_pattern = self._get_cell_delimiter()
+                cell_code, cell_end_line = self._extract_cell_code_sync(lines, current_line, delimiter_pattern)
                 if not cell_code.strip():
                     self.nvim.out_write("No code found in current cell\n")
                     return
@@ -188,13 +231,21 @@ class Quench:
             self._logger.error(f"Traceback: {traceback.format_exc()}")
             self.nvim.err_write(f"Quench error: {e}\n")
 
-    def _extract_cell_code_sync(self, lines, lnum):
+    def _extract_cell_code_sync(self, lines, lnum, delimiter_pattern):
         """
         Extract cell code synchronously (no async calls).
         Same logic as ui_manager.get_cell_code but without async.
+        
+        Args:
+            lines: List of buffer lines
+            lnum: Current line number (1-indexed)
+            delimiter_pattern: Regex pattern for cell delimiters
+            
+        Returns:
+            tuple: (cell_code, cell_end_line) where cell_end_line is 1-indexed
         """
         if not lines:
-            return ""
+            return "", 0
 
         # Convert to 0-indexed for Python list access
         current_line_idx = lnum - 1
@@ -205,7 +256,7 @@ class Quench:
         cell_start = 0
         for i in range(current_line_idx, -1, -1):
             line = lines[i].strip()
-            if line.startswith('#%%'):
+            if re.match(delimiter_pattern, line):
                 if i == current_line_idx:
                     # If we're on a cell delimiter line, start from the next line
                     cell_start = i + 1
@@ -218,7 +269,7 @@ class Quench:
         cell_end = len(lines)
         for i in range(current_line_idx + 1, len(lines)):
             line = lines[i].strip()
-            if line.startswith('#%%'):
+            if re.match(delimiter_pattern, line):
                 cell_end = i
                 break
 
@@ -231,7 +282,7 @@ class Quench:
         while cell_lines and not cell_lines[-1].strip():
             cell_lines.pop()
 
-        return '\n'.join(cell_lines)
+        return '\n'.join(cell_lines), cell_end
 
     async def _run_cell_async(self, current_bnum, cell_code):
         """
@@ -267,6 +318,41 @@ class Quench:
                     pass
                 # Continue without web server
         
+        # Check if buffer already has a kernel session
+        existing_session = await self.kernel_manager.get_session_for_buffer(current_bnum)
+        kernel_name = None
+        
+        # If no existing session, prompt user to select a kernel
+        if existing_session is None:
+            try:
+                # Discover available kernels
+                kernelspecs = await self.kernel_manager.discover_kernelspecs()
+                
+                if len(kernelspecs) > 1:
+                    # Create choice options with display names and values
+                    kernel_choices = []
+                    for spec in kernelspecs:
+                        kernel_choices.append({
+                            'display_name': spec['display_name'],
+                            'value': spec['name']
+                        })
+                    
+                    # Prompt user to select kernel
+                    kernel_name = await self.ui_manager.get_user_choice(kernel_choices)
+                    
+                    if kernel_name is None:
+                        # User cancelled or error occurred, use first kernel
+                        kernel_name = kernelspecs[0]['name']
+                        self._logger.warning("User cancelled kernel selection, using default")
+                else:
+                    # Only one kernel available, use it
+                    kernel_name = kernelspecs[0]['name'] if kernelspecs else None
+                    
+            except Exception as e:
+                self._logger.error(f"Error during kernel discovery: {e}")
+                # Continue with default kernel
+                kernel_name = None
+        
         # Get or create kernel session for this buffer
         # Try to get a meaningful buffer name
         try:
@@ -281,7 +367,8 @@ class Quench:
         session = await self.kernel_manager.get_or_create_session(
             current_bnum, 
             self.relay_queue,
-            buffer_name
+            buffer_name,
+            kernel_name
         )
         
         # Start message relay loop if not running
@@ -469,6 +556,614 @@ class Quench:
         except Exception as e:
             self._logger.error(f"Error in QuenchStop: {e}")
             self.nvim.err_write(f"Stop error: {e}\n")
+
+    @pynvim.command("QuenchRunCellAdvance", sync=True)
+    def run_cell_advance(self):
+        """
+        Execute the current cell and advance cursor to the line following the end of that cell.
+        """
+        try:
+            self._logger.info("QuenchRunCellAdvance called - starting execution")
+            self.nvim.out_write("QuenchRunCellAdvance: Starting execution...\n")
+            
+            # Get current position and buffer data
+            try:
+                current_bnum = self.nvim.current.buffer.number
+                current_line = self.nvim.current.window.cursor[0]  # 1-indexed
+                buffer = self.nvim.current.buffer
+                lines = buffer[:]
+                
+            except Exception as e:
+                self._logger.error(f"Error getting buffer data: {e}")
+                self.nvim.err_write(f"Error accessing buffer: {e}\n")
+                return
+            
+            # Extract cell code and get end line
+            try:
+                delimiter_pattern = self._get_cell_delimiter()
+                cell_code, cell_end_line = self._extract_cell_code_sync(lines, current_line, delimiter_pattern)
+                if not cell_code.strip():
+                    self.nvim.out_write("No code found in current cell\n")
+                    return
+                
+                self._logger.debug(f"Cell code extracted: {len(cell_code)} characters, ends at line {cell_end_line}")
+                
+            except Exception as e:
+                self._logger.error(f"Error extracting cell code: {e}")
+                self.nvim.err_write(f"Error extracting cell: {e}\n")
+                return
+            
+            # Execute the cell
+            try:
+                # Try to get or create event loop
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Create task in existing loop
+                        task = asyncio.create_task(self._run_cell_async(current_bnum, cell_code))
+                        
+                        # Add callback to advance cursor after execution
+                        def handle_task_and_advance(task):
+                            if task.exception():
+                                self._logger.error(f"Background task failed: {task.exception()}")
+                                try:
+                                    self.nvim.async_call(lambda: self.nvim.err_write(f"Execution failed: {task.exception()}\n"))
+                                except:
+                                    pass
+                            else:
+                                # Advance cursor to line following cell end
+                                def advance_cursor():
+                                    try:
+                                        advance_to_line = cell_end_line + 1 if cell_end_line < len(lines) else len(lines)
+                                        self.nvim.current.window.cursor = (advance_to_line, 0)
+                                        self.nvim.out_write(f"Cursor advanced to line {advance_to_line}\n")
+                                    except Exception as e:
+                                        self._logger.error(f"Error advancing cursor: {e}")
+                                
+                                try:
+                                    self.nvim.async_call(advance_cursor)
+                                except:
+                                    pass
+                        
+                        task.add_done_callback(handle_task_and_advance)
+                        self.nvim.out_write("Cell execution started in background...\n")
+                    else:
+                        # Run in existing loop
+                        loop.run_until_complete(self._run_cell_async(current_bnum, cell_code))
+                        # Advance cursor after execution
+                        advance_to_line = cell_end_line + 1 if cell_end_line < len(lines) else len(lines)
+                        self.nvim.current.window.cursor = (advance_to_line, 0)
+                        self.nvim.out_write(f"Cursor advanced to line {advance_to_line}\n")
+                except RuntimeError:
+                    # No event loop, create one
+                    asyncio.run(self._run_cell_async(current_bnum, cell_code))
+                    # Advance cursor after execution
+                    advance_to_line = cell_end_line + 1 if cell_end_line < len(lines) else len(lines)
+                    self.nvim.current.window.cursor = (advance_to_line, 0)
+                    self.nvim.out_write(f"Cursor advanced to line {advance_to_line}\n")
+                    
+            except Exception as e:
+                self._logger.error(f"Error in async execution: {e}")
+                self.nvim.err_write(f"Execution error: {e}\n")
+                
+        except Exception as e:
+            self._logger.error(f"Error in QuenchRunCellAdvance: {e}")
+            self.nvim.err_write(f"Quench error: {e}\n")
+
+    @pynvim.command("QuenchRunSelection", range=True, sync=True)
+    def run_selection(self, range_info):
+        """
+        Execute the code from the visually selected lines.
+        
+        Args:
+            range_info: Range information from Neovim (start_line, end_line)
+        """
+        try:
+            self._logger.info("QuenchRunSelection called - starting execution")
+            self.nvim.out_write("QuenchRunSelection: Starting execution...\n")
+            
+            # Get range information
+            try:
+                start_line, end_line = range_info
+                current_bnum = self.nvim.current.buffer.number
+                buffer = self.nvim.current.buffer
+                
+                # Extract selected lines (convert to 0-indexed for buffer access)
+                selected_lines = buffer[start_line-1:end_line]
+                selected_code = '\n'.join(selected_lines)
+                
+                if not selected_code.strip():
+                    self.nvim.out_write("No code found in selection\n")
+                    return
+                
+                self._logger.debug(f"Selected code extracted: {len(selected_code)} characters from lines {start_line}-{end_line}")
+                self.nvim.out_write(f"Executing selection ({len(selected_code)} chars)...\n")
+                
+            except Exception as e:
+                self._logger.error(f"Error extracting selection: {e}")
+                self.nvim.err_write(f"Error extracting selection: {e}\n")
+                return
+            
+            # Execute the selection
+            try:
+                # Try to get or create event loop
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Create task in existing loop
+                        task = asyncio.create_task(self._run_cell_async(current_bnum, selected_code))
+                        self.nvim.out_write("Selection execution started in background...\n")
+                        
+                        # Add error callback to the task
+                        def handle_task_exception(task):
+                            if task.exception():
+                                self._logger.error(f"Background task failed: {task.exception()}")
+                                try:
+                                    self.nvim.async_call(lambda: self.nvim.err_write(f"Execution failed: {task.exception()}\n"))
+                                except:
+                                    pass
+                        
+                        task.add_done_callback(handle_task_exception)
+                    else:
+                        # Run in existing loop
+                        loop.run_until_complete(self._run_cell_async(current_bnum, selected_code))
+                except RuntimeError:
+                    # No event loop, create one
+                    asyncio.run(self._run_cell_async(current_bnum, selected_code))
+                    
+            except Exception as e:
+                self._logger.error(f"Error in async execution: {e}")
+                self.nvim.err_write(f"Execution error: {e}\n")
+                
+        except Exception as e:
+            self._logger.error(f"Error in QuenchRunSelection: {e}")
+            self.nvim.err_write(f"Quench error: {e}\n")
+
+    @pynvim.command("QuenchRunLine", sync=True)
+    def run_line(self):
+        """
+        Execute only the line the cursor is currently on.
+        """
+        try:
+            self._logger.info("QuenchRunLine called - starting execution")
+            self.nvim.out_write("QuenchRunLine: Starting execution...\n")
+            
+            # Get current line
+            try:
+                current_bnum = self.nvim.current.buffer.number
+                current_line_num = self.nvim.current.window.cursor[0]  # 1-indexed
+                buffer = self.nvim.current.buffer
+                
+                # Extract current line (convert to 0-indexed for buffer access)
+                current_line_code = buffer[current_line_num - 1]
+                
+                if not current_line_code.strip():
+                    self.nvim.out_write("Current line is empty\n")
+                    return
+                
+                self._logger.debug(f"Current line code: {current_line_code}")
+                self.nvim.out_write(f"Executing line {current_line_num}: {current_line_code.strip()[:50]}...\n")
+                
+            except Exception as e:
+                self._logger.error(f"Error extracting current line: {e}")
+                self.nvim.err_write(f"Error extracting current line: {e}\n")
+                return
+            
+            # Execute the line
+            try:
+                # Try to get or create event loop
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Create task in existing loop
+                        task = asyncio.create_task(self._run_cell_async(current_bnum, current_line_code))
+                        self.nvim.out_write("Line execution started in background...\n")
+                        
+                        # Add error callback to the task
+                        def handle_task_exception(task):
+                            if task.exception():
+                                self._logger.error(f"Background task failed: {task.exception()}")
+                                try:
+                                    self.nvim.async_call(lambda: self.nvim.err_write(f"Execution failed: {task.exception()}\n"))
+                                except:
+                                    pass
+                        
+                        task.add_done_callback(handle_task_exception)
+                    else:
+                        # Run in existing loop
+                        loop.run_until_complete(self._run_cell_async(current_bnum, current_line_code))
+                except RuntimeError:
+                    # No event loop, create one
+                    asyncio.run(self._run_cell_async(current_bnum, current_line_code))
+                    
+            except Exception as e:
+                self._logger.error(f"Error in async execution: {e}")
+                self.nvim.err_write(f"Execution error: {e}\n")
+                
+        except Exception as e:
+            self._logger.error(f"Error in QuenchRunLine: {e}")
+            self.nvim.err_write(f"Quench error: {e}\n")
+
+    @pynvim.command("QuenchRunAbove", sync=True)
+    def run_above(self):
+        """
+        Run all cells from the top of the buffer up to (but not including) the current cell.
+        """
+        try:
+            self._logger.info("QuenchRunAbove called - starting execution")
+            self.nvim.out_write("QuenchRunAbove: Starting execution...\n")
+            
+            # Get buffer data
+            try:
+                current_bnum = self.nvim.current.buffer.number
+                current_line = self.nvim.current.window.cursor[0]  # 1-indexed
+                buffer = self.nvim.current.buffer
+                lines = buffer[:]
+                
+            except Exception as e:
+                self._logger.error(f"Error getting buffer data: {e}")
+                self.nvim.err_write(f"Error accessing buffer: {e}\n")
+                return
+            
+            # Find all cells above current position
+            try:
+                delimiter_pattern = self._get_cell_delimiter()
+                cells_to_run = self._extract_cells_above(lines, current_line, delimiter_pattern)
+                
+                if not cells_to_run:
+                    self.nvim.out_write("No cells found above current position\n")
+                    return
+                
+                # Combine all cell codes
+                combined_code = '\n\n'.join(cells_to_run)
+                self._logger.debug(f"Combined code from {len(cells_to_run)} cells: {len(combined_code)} characters")
+                self.nvim.out_write(f"Executing {len(cells_to_run)} cells above current position...\n")
+                
+            except Exception as e:
+                self._logger.error(f"Error extracting cells above: {e}")
+                self.nvim.err_write(f"Error extracting cells: {e}\n")
+                return
+            
+            # Execute the combined code
+            try:
+                # Try to get or create event loop
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Create task in existing loop
+                        task = asyncio.create_task(self._run_cell_async(current_bnum, combined_code))
+                        self.nvim.out_write("Execution started in background...\n")
+                        
+                        # Add error callback to the task
+                        def handle_task_exception(task):
+                            if task.exception():
+                                self._logger.error(f"Background task failed: {task.exception()}")
+                                try:
+                                    self.nvim.async_call(lambda: self.nvim.err_write(f"Execution failed: {task.exception()}\n"))
+                                except:
+                                    pass
+                        
+                        task.add_done_callback(handle_task_exception)
+                    else:
+                        # Run in existing loop
+                        loop.run_until_complete(self._run_cell_async(current_bnum, combined_code))
+                except RuntimeError:
+                    # No event loop, create one
+                    asyncio.run(self._run_cell_async(current_bnum, combined_code))
+                    
+            except Exception as e:
+                self._logger.error(f"Error in async execution: {e}")
+                self.nvim.err_write(f"Execution error: {e}\n")
+                
+        except Exception as e:
+            self._logger.error(f"Error in QuenchRunAbove: {e}")
+            self.nvim.err_write(f"Quench error: {e}\n")
+
+    @pynvim.command("QuenchRunBelow", sync=True)
+    def run_below(self):
+        """
+        Run all cells from the current cell to the end of the buffer.
+        """
+        try:
+            self._logger.info("QuenchRunBelow called - starting execution")
+            self.nvim.out_write("QuenchRunBelow: Starting execution...\n")
+            
+            # Get buffer data
+            try:
+                current_bnum = self.nvim.current.buffer.number
+                current_line = self.nvim.current.window.cursor[0]  # 1-indexed
+                buffer = self.nvim.current.buffer
+                lines = buffer[:]
+                
+            except Exception as e:
+                self._logger.error(f"Error getting buffer data: {e}")
+                self.nvim.err_write(f"Error accessing buffer: {e}\n")
+                return
+            
+            # Find all cells from current position to end
+            try:
+                delimiter_pattern = self._get_cell_delimiter()
+                cells_to_run = self._extract_cells_below(lines, current_line, delimiter_pattern)
+                
+                if not cells_to_run:
+                    self.nvim.out_write("No cells found from current position to end\n")
+                    return
+                
+                # Combine all cell codes
+                combined_code = '\n\n'.join(cells_to_run)
+                self._logger.debug(f"Combined code from {len(cells_to_run)} cells: {len(combined_code)} characters")
+                self.nvim.out_write(f"Executing {len(cells_to_run)} cells from current position to end...\n")
+                
+            except Exception as e:
+                self._logger.error(f"Error extracting cells below: {e}")
+                self.nvim.err_write(f"Error extracting cells: {e}\n")
+                return
+            
+            # Execute the combined code
+            try:
+                # Try to get or create event loop
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Create task in existing loop
+                        task = asyncio.create_task(self._run_cell_async(current_bnum, combined_code))
+                        self.nvim.out_write("Execution started in background...\n")
+                        
+                        # Add error callback to the task
+                        def handle_task_exception(task):
+                            if task.exception():
+                                self._logger.error(f"Background task failed: {task.exception()}")
+                                try:
+                                    self.nvim.async_call(lambda: self.nvim.err_write(f"Execution failed: {task.exception()}\n"))
+                                except:
+                                    pass
+                        
+                        task.add_done_callback(handle_task_exception)
+                    else:
+                        # Run in existing loop
+                        loop.run_until_complete(self._run_cell_async(current_bnum, combined_code))
+                except RuntimeError:
+                    # No event loop, create one
+                    asyncio.run(self._run_cell_async(current_bnum, combined_code))
+                    
+            except Exception as e:
+                self._logger.error(f"Error in async execution: {e}")
+                self.nvim.err_write(f"Execution error: {e}\n")
+                
+        except Exception as e:
+            self._logger.error(f"Error in QuenchRunBelow: {e}")
+            self.nvim.err_write(f"Quench error: {e}\n")
+
+    @pynvim.command("QuenchRunAll", sync=True)
+    def run_all(self):
+        """
+        Run all cells in the current buffer.
+        """
+        try:
+            self._logger.info("QuenchRunAll called - starting execution")
+            self.nvim.out_write("QuenchRunAll: Starting execution...\n")
+            
+            # Get buffer data
+            try:
+                current_bnum = self.nvim.current.buffer.number
+                buffer = self.nvim.current.buffer
+                lines = buffer[:]
+                
+            except Exception as e:
+                self._logger.error(f"Error getting buffer data: {e}")
+                self.nvim.err_write(f"Error accessing buffer: {e}\n")
+                return
+            
+            # Find all cells in the buffer
+            try:
+                delimiter_pattern = self._get_cell_delimiter()
+                all_cells = self._extract_all_cells(lines, delimiter_pattern)
+                
+                if not all_cells:
+                    self.nvim.out_write("No cells found in buffer\n")
+                    return
+                
+                # Combine all cell codes
+                combined_code = '\n\n'.join(all_cells)
+                self._logger.debug(f"Combined code from {len(all_cells)} cells: {len(combined_code)} characters")
+                self.nvim.out_write(f"Executing all {len(all_cells)} cells in buffer...\n")
+                
+            except Exception as e:
+                self._logger.error(f"Error extracting all cells: {e}")
+                self.nvim.err_write(f"Error extracting cells: {e}\n")
+                return
+            
+            # Execute the combined code
+            try:
+                # Try to get or create event loop
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Create task in existing loop
+                        task = asyncio.create_task(self._run_cell_async(current_bnum, combined_code))
+                        self.nvim.out_write("Execution started in background...\n")
+                        
+                        # Add error callback to the task
+                        def handle_task_exception(task):
+                            if task.exception():
+                                self._logger.error(f"Background task failed: {task.exception()}")
+                                try:
+                                    self.nvim.async_call(lambda: self.nvim.err_write(f"Execution failed: {task.exception()}\n"))
+                                except:
+                                    pass
+                        
+                        task.add_done_callback(handle_task_exception)
+                    else:
+                        # Run in existing loop
+                        loop.run_until_complete(self._run_cell_async(current_bnum, combined_code))
+                except RuntimeError:
+                    # No event loop, create one
+                    asyncio.run(self._run_cell_async(current_bnum, combined_code))
+                    
+            except Exception as e:
+                self._logger.error(f"Error in async execution: {e}")
+                self.nvim.err_write(f"Execution error: {e}\n")
+                
+        except Exception as e:
+            self._logger.error(f"Error in QuenchRunAll: {e}")
+            self.nvim.err_write(f"Quench error: {e}\n")
+
+    def _extract_cells_above(self, lines, current_line, delimiter_pattern):
+        """
+        Extract all cell codes from the top of buffer up to (but not including) current cell.
+        
+        Args:
+            lines: List of buffer lines
+            current_line: Current cursor line (1-indexed)
+            delimiter_pattern: Regex pattern for cell delimiters
+            
+        Returns:
+            list: List of cell code strings
+        """
+        if not lines:
+            return []
+
+        # Convert to 0-indexed
+        current_line_idx = current_line - 1
+        if current_line_idx >= len(lines):
+            current_line_idx = len(lines) - 1
+
+        # Find start of current cell
+        current_cell_start = 0
+        for i in range(current_line_idx, -1, -1):
+            line = lines[i].strip()
+            if re.match(delimiter_pattern, line):
+                if i == current_line_idx:
+                    # If we're on a delimiter, current cell starts at next line
+                    current_cell_start = i + 1
+                else:
+                    # Found previous delimiter, current cell starts after it
+                    current_cell_start = i + 1
+                break
+
+        # Find all cell delimiters before current cell
+        cell_starts = [0]  # Buffer always starts a cell
+        for i in range(current_cell_start):
+            line = lines[i].strip()
+            if re.match(delimiter_pattern, line):
+                cell_starts.append(i + 1)  # Cell starts after delimiter
+
+        # Extract cells
+        cells = []
+        for i in range(len(cell_starts)):
+            start = cell_starts[i]
+            end = cell_starts[i + 1] - 1 if i + 1 < len(cell_starts) else current_cell_start
+            
+            if start < end:
+                cell_lines = lines[start:end]
+                # Remove empty lines at beginning and end
+                while cell_lines and not cell_lines[0].strip():
+                    cell_lines.pop(0)
+                while cell_lines and not cell_lines[-1].strip():
+                    cell_lines.pop()
+                
+                if cell_lines:
+                    cells.append('\n'.join(cell_lines))
+
+        return cells
+
+    def _extract_cells_below(self, lines, current_line, delimiter_pattern):
+        """
+        Extract all cell codes from current cell to end of buffer.
+        
+        Args:
+            lines: List of buffer lines
+            current_line: Current cursor line (1-indexed)
+            delimiter_pattern: Regex pattern for cell delimiters
+            
+        Returns:
+            list: List of cell code strings
+        """
+        if not lines:
+            return []
+
+        # Convert to 0-indexed
+        current_line_idx = current_line - 1
+        if current_line_idx >= len(lines):
+            current_line_idx = len(lines) - 1
+
+        # Find start of current cell
+        current_cell_start = 0
+        for i in range(current_line_idx, -1, -1):
+            line = lines[i].strip()
+            if re.match(delimiter_pattern, line):
+                if i == current_line_idx:
+                    # If we're on a delimiter, current cell starts at next line
+                    current_cell_start = i + 1
+                else:
+                    # Found previous delimiter, current cell starts after it
+                    current_cell_start = i + 1
+                break
+
+        # Find all cell delimiters from current position to end
+        cell_starts = [current_cell_start]
+        for i in range(current_cell_start, len(lines)):
+            line = lines[i].strip()
+            if re.match(delimiter_pattern, line):
+                cell_starts.append(i + 1)  # Cell starts after delimiter
+
+        # Extract cells
+        cells = []
+        for i in range(len(cell_starts)):
+            start = cell_starts[i]
+            end = cell_starts[i + 1] - 1 if i + 1 < len(cell_starts) else len(lines)
+            
+            if start < end:
+                cell_lines = lines[start:end]
+                # Remove empty lines at beginning and end
+                while cell_lines and not cell_lines[0].strip():
+                    cell_lines.pop(0)
+                while cell_lines and not cell_lines[-1].strip():
+                    cell_lines.pop()
+                
+                if cell_lines:
+                    cells.append('\n'.join(cell_lines))
+
+        return cells
+
+    def _extract_all_cells(self, lines, delimiter_pattern):
+        """
+        Extract all cell codes from the entire buffer.
+        
+        Args:
+            lines: List of buffer lines
+            delimiter_pattern: Regex pattern for cell delimiters
+            
+        Returns:
+            list: List of cell code strings
+        """
+        if not lines:
+            return []
+
+        # Find all cell delimiters
+        cell_starts = [0]  # Buffer always starts a cell
+        for i, line in enumerate(lines):
+            if re.match(delimiter_pattern, line.strip()):
+                cell_starts.append(i + 1)  # Cell starts after delimiter
+
+        # Extract cells
+        cells = []
+        for i in range(len(cell_starts)):
+            start = cell_starts[i]
+            end = cell_starts[i + 1] - 1 if i + 1 < len(cell_starts) else len(lines)
+            
+            if start < end:
+                cell_lines = lines[start:end]
+                # Remove empty lines at beginning and end
+                while cell_lines and not cell_lines[0].strip():
+                    cell_lines.pop(0)
+                while cell_lines and not cell_lines[-1].strip():
+                    cell_lines.pop()
+                
+                if cell_lines:
+                    cells.append('\n'.join(cell_lines))
+
+        return cells
 
     # Keep the original HelloWorld command for backward compatibility
     @pynvim.command('HelloWorld', sync=True)

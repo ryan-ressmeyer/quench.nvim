@@ -296,6 +296,374 @@ class TestNvimUIManager:
         result = await self.ui_manager.get_user_choice(items)
         assert result is None
 
+    @pytest.mark.asyncio
+    async def test_get_user_choice_single_dict_item(self):
+        """Test user choice with single dictionary item."""
+        item = {'display_name': 'Python 3.9', 'value': 'python39'}
+        result = await self.ui_manager.get_user_choice([item])
+        assert result == 'python39'
+    
+    @pytest.mark.asyncio
+    async def test_get_user_choice_single_dict_no_value(self):
+        """Test user choice with single dictionary item without value key."""
+        item = {'display_name': 'Python 3.9'}
+        result = await self.ui_manager.get_user_choice([item])
+        assert result == item  # Should return the whole dict if no value key
+    
+    @pytest.mark.asyncio
+    async def test_get_user_choice_multiple_dict_items(self):
+        """Test user choice with multiple dictionary items."""
+        self.nvim.call = Mock(return_value='2')  # User selects option 2
+        
+        items = [
+            {'display_name': 'Python 3.9', 'value': 'python39'},
+            {'display_name': 'Python 3.10', 'value': 'python310'},
+            {'display_name': 'Conda Environment', 'value': 'conda_env'}
+        ]
+        result = await self.ui_manager.get_user_choice(items)
+        assert result == 'python310'
+    
+    @pytest.mark.asyncio
+    async def test_get_user_choice_dict_without_display_name(self):
+        """Test user choice with dictionary items without display_name."""
+        self.nvim.call = Mock(return_value='1')  # User selects option 1
+        
+        items = [
+            {'value': 'python39'},
+            {'value': 'python310'}
+        ]
+        result = await self.ui_manager.get_user_choice(items)
+        assert result == 'python39'
+    
+    @pytest.mark.asyncio
+    async def test_get_user_choice_mixed_items(self):
+        """Test user choice with mixed string and dictionary items."""
+        self.nvim.call = Mock(return_value='3')  # User selects option 3
+        
+        items = [
+            'string_option',
+            {'display_name': 'Python 3.9', 'value': 'python39'},
+            {'display_name': 'Python 3.10', 'value': 'python310'}
+        ]
+        result = await self.ui_manager.get_user_choice(items)
+        assert result == 'python310'
+    
+    @pytest.mark.asyncio
+    async def test_get_user_choice_dict_fallback_display(self):
+        """Test user choice with dictionary using fallback display logic."""
+        self.nvim.call = Mock(return_value='1')  # User selects option 1
+        
+        items = [
+            {'some_key': 'some_value'},  # No display_name or value, should use str representation
+        ]
+        result = await self.ui_manager.get_user_choice(items)
+        assert result == items[0]  # Should return the whole dict
+
+
+class TestKernelSessionManager:
+    """Test KernelSessionManager methods."""
+    
+    def setup_method(self):
+        """Set up test fixtures."""
+        # Reset singleton instance for testing
+        from quench.kernel_session import KernelSessionManager
+        KernelSessionManager._instance = None
+        KernelSessionManager._initialized = False
+        self.manager = KernelSessionManager()
+    
+    @pytest.mark.asyncio
+    async def test_discover_kernelspecs_success(self):
+        """Test successful discovery of kernel specifications."""
+        from unittest.mock import patch, mock_open
+        import json
+        
+        # Mock jupyter kernelspec command output
+        mock_kernelspec_data = {
+            "kernelspecs": {
+                "python3": {
+                    "resource_dir": "/usr/local/share/jupyter/kernels/python3",
+                    "spec": {
+                        "argv": [
+                            "python",
+                            "-m",
+                            "ipykernel_launcher",
+                            "-f",
+                            "{connection_file}"
+                        ],
+                        "env": {},
+                        "display_name": "Python 3",
+                        "language": "python",
+                        "interrupt_mode": "signal",
+                        "metadata": {}
+                    }
+                },
+                "conda-base": {
+                    "resource_dir": "/home/user/anaconda3/share/jupyter/kernels/python3",
+                    "spec": {
+                        "argv": [
+                            "/home/user/anaconda3/bin/python",
+                            "-m",
+                            "ipykernel_launcher",
+                            "-f",
+                            "{connection_file}"
+                        ],
+                        "env": {},
+                        "display_name": "Python 3 (conda-base)",
+                        "language": "python",
+                        "interrupt_mode": "signal",
+                        "metadata": {}
+                    }
+                }
+            }
+        }
+        
+        mock_result = Mock()
+        mock_result.stdout = json.dumps(mock_kernelspec_data)
+        mock_result.returncode = 0
+        
+        with patch('subprocess.run', return_value=mock_result) as mock_run, \
+             patch('sys.executable', '/usr/bin/python3'):
+            
+            kernelspecs = await self.manager.discover_kernelspecs()
+            
+            # Verify subprocess.run was called with correct arguments
+            mock_run.assert_called_once_with(
+                ['jupyter', 'kernelspec', 'list', '--json'],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=10
+            )
+            
+            # Verify results
+            assert len(kernelspecs) == 3  # Neovim's Python + 2 discovered
+            
+            # Check Neovim's Python kernel (should be first)
+            neovim_kernel = kernelspecs[0]
+            assert neovim_kernel['name'] == 'neovim_python'
+            assert neovim_kernel['display_name'] == "Neovim's Python"
+            assert neovim_kernel['argv'] == ['/usr/bin/python3', '-m', 'ipykernel_launcher', '-f', '{connection_file}']
+            
+            # Check discovered kernels
+            python3_kernel = next((k for k in kernelspecs if k['name'] == 'python3'), None)
+            assert python3_kernel is not None
+            assert python3_kernel['display_name'] == 'Python 3'
+            assert python3_kernel['argv'] == ['python', '-m', 'ipykernel_launcher', '-f', '{connection_file}']
+            
+            conda_kernel = next((k for k in kernelspecs if k['name'] == 'conda-base'), None)
+            assert conda_kernel is not None
+            assert conda_kernel['display_name'] == 'Python 3 (conda-base)'
+            assert conda_kernel['argv'] == ['/home/user/anaconda3/bin/python', '-m', 'ipykernel_launcher', '-f', '{connection_file}']
+    
+    @pytest.mark.asyncio
+    async def test_discover_kernelspecs_jupyter_not_found(self):
+        """Test discovery when jupyter command is not found."""
+        from unittest.mock import patch
+        
+        with patch('subprocess.run', side_effect=FileNotFoundError("jupyter not found")) as mock_run, \
+             patch('sys.executable', '/usr/bin/python3'):
+            
+            kernelspecs = await self.manager.discover_kernelspecs()
+            
+            # Should still return Neovim's Python kernel
+            assert len(kernelspecs) == 1
+            assert kernelspecs[0]['name'] == 'neovim_python'
+            assert kernelspecs[0]['display_name'] == "Neovim's Python"
+    
+    @pytest.mark.asyncio
+    async def test_discover_kernelspecs_subprocess_error(self):
+        """Test discovery when jupyter command fails."""
+        from unittest.mock import patch
+        import subprocess
+        
+        with patch('subprocess.run', side_effect=subprocess.CalledProcessError(1, 'jupyter')) as mock_run, \
+             patch('sys.executable', '/usr/bin/python3'):
+            
+            kernelspecs = await self.manager.discover_kernelspecs()
+            
+            # Should still return Neovim's Python kernel
+            assert len(kernelspecs) == 1
+            assert kernelspecs[0]['name'] == 'neovim_python'
+    
+    @pytest.mark.asyncio
+    async def test_discover_kernelspecs_invalid_json(self):
+        """Test discovery with invalid JSON response."""
+        from unittest.mock import patch
+        
+        mock_result = Mock()
+        mock_result.stdout = "invalid json"
+        mock_result.returncode = 0
+        
+        with patch('subprocess.run', return_value=mock_result) as mock_run, \
+             patch('sys.executable', '/usr/bin/python3'):
+            
+            kernelspecs = await self.manager.discover_kernelspecs()
+            
+            # Should still return Neovim's Python kernel
+            assert len(kernelspecs) == 1
+            assert kernelspecs[0]['name'] == 'neovim_python'
+    
+    @pytest.mark.asyncio
+    async def test_discover_kernelspecs_timeout(self):
+        """Test discovery with subprocess timeout."""
+        from unittest.mock import patch
+        import subprocess
+        
+        with patch('subprocess.run', side_effect=subprocess.TimeoutExpired('jupyter', 10)) as mock_run, \
+             patch('sys.executable', '/usr/bin/python3'):
+            
+            kernelspecs = await self.manager.discover_kernelspecs()
+            
+            # Should still return Neovim's Python kernel
+            assert len(kernelspecs) == 1
+            assert kernelspecs[0]['name'] == 'neovim_python'
+    
+    @pytest.mark.asyncio
+    async def test_kernel_session_with_custom_kernel_name(self):
+        """Test creating a KernelSession with a custom kernel name."""
+        from unittest.mock import Mock, AsyncMock, patch
+        
+        # Create a mock relay queue
+        relay_queue = Mock()
+        
+        # Create session with custom kernel name
+        session = self.manager.sessions.__class__.__dict__['__module__']
+        from quench.kernel_session import KernelSession
+        kernel_session = KernelSession(relay_queue, "test_buffer", "conda-env")
+        
+        # Verify the kernel name is set correctly
+        assert kernel_session.kernel_name == "conda-env"
+        assert kernel_session.buffer_name == "test_buffer"
+    
+    @pytest.mark.asyncio
+    async def test_kernel_session_default_kernel_name(self):
+        """Test creating a KernelSession with default kernel name."""
+        from unittest.mock import Mock
+        
+        # Create a mock relay queue
+        relay_queue = Mock()
+        
+        # Create session without kernel name (should default to 'python3')
+        from quench.kernel_session import KernelSession
+        kernel_session = KernelSession(relay_queue, "test_buffer")
+        
+        # Verify the kernel name defaults to 'python3'
+        assert kernel_session.kernel_name == "python3"
+    
+    @pytest.mark.asyncio
+    async def test_kernel_session_start_with_custom_kernel(self):
+        """Test starting a kernel session with a custom kernel name."""
+        from unittest.mock import Mock, AsyncMock, patch
+        
+        # Create a mock relay queue
+        relay_queue = Mock()
+        
+        # Create session with custom kernel name
+        from quench.kernel_session import KernelSession
+        kernel_session = KernelSession(relay_queue, "test_buffer", "conda-env")
+        
+        # Mock the AsyncKernelManager and related components
+        mock_km = AsyncMock()
+        mock_client = AsyncMock()
+        mock_km.client.return_value = mock_client
+        
+        with patch('quench.kernel_session.AsyncKernelManager', return_value=mock_km) as mock_km_class, \
+             patch('quench.kernel_session.JUPYTER_CLIENT_AVAILABLE', True), \
+             patch.object(kernel_session, '_listen_iopub', new_callable=AsyncMock) as mock_listen:
+            
+            await kernel_session.start()
+            
+            # Verify AsyncKernelManager was created with the correct kernel name
+            mock_km_class.assert_called_once_with(kernel_name='conda-env')
+            mock_km.start_kernel.assert_called_once()
+            mock_client.start_channels.assert_called_once()
+            mock_client.wait_for_ready.assert_called_once_with(timeout=30)
+    
+    @pytest.mark.asyncio
+    async def test_kernel_session_start_with_override_kernel(self):
+        """Test starting a kernel session with kernel name override."""
+        from unittest.mock import Mock, AsyncMock, patch
+        
+        # Create a mock relay queue
+        relay_queue = Mock()
+        
+        # Create session with one kernel name but override during start
+        from quench.kernel_session import KernelSession
+        kernel_session = KernelSession(relay_queue, "test_buffer", "python3")
+        
+        # Mock the AsyncKernelManager and related components
+        mock_km = AsyncMock()
+        mock_client = AsyncMock()
+        mock_km.client.return_value = mock_client
+        
+        with patch('quench.kernel_session.AsyncKernelManager', return_value=mock_km) as mock_km_class, \
+             patch('quench.kernel_session.JUPYTER_CLIENT_AVAILABLE', True), \
+             patch.object(kernel_session, '_listen_iopub', new_callable=AsyncMock) as mock_listen:
+            
+            # Start with a different kernel name
+            await kernel_session.start("julia-1.6")
+            
+            # Verify AsyncKernelManager was created with the override kernel name
+            mock_km_class.assert_called_once_with(kernel_name='julia-1.6')
+    
+    @pytest.mark.asyncio
+    async def test_get_or_create_session_with_kernel_name(self):
+        """Test get_or_create_session with custom kernel name."""
+        from unittest.mock import Mock, AsyncMock, patch
+        
+        # Create a mock relay queue
+        relay_queue = AsyncMock()
+        
+        # Mock the KernelSession and its start method
+        with patch('quench.kernel_session.KernelSession') as mock_session_class:
+            mock_session = AsyncMock()
+            mock_session.kernel_id = "test-kernel-id"
+            mock_session.start = AsyncMock()
+            mock_session_class.return_value = mock_session
+            
+            # Create session with custom kernel name
+            session = await self.manager.get_or_create_session(
+                bnum=1, 
+                relay_queue=relay_queue, 
+                buffer_name="test_buffer",
+                kernel_name="conda-env"
+            )
+            
+            # Verify KernelSession was created with the correct parameters
+            mock_session_class.assert_called_once_with(relay_queue, "test_buffer", "conda-env")
+            mock_session.start.assert_called_once()
+            
+            # Verify session is stored and mapped correctly
+            assert session == mock_session
+            assert "test-kernel-id" in self.manager.sessions
+            assert 1 in self.manager.buffer_to_kernel_map
+    
+    @pytest.mark.asyncio
+    async def test_get_or_create_session_default_kernel_name(self):
+        """Test get_or_create_session with default kernel name."""
+        from unittest.mock import Mock, AsyncMock, patch
+        
+        # Create a mock relay queue
+        relay_queue = AsyncMock()
+        
+        # Mock the KernelSession and its start method
+        with patch('quench.kernel_session.KernelSession') as mock_session_class:
+            mock_session = AsyncMock()
+            mock_session.kernel_id = "test-kernel-id-2"
+            mock_session.start = AsyncMock()
+            mock_session_class.return_value = mock_session
+            
+            # Create session without kernel name (should pass None)
+            session = await self.manager.get_or_create_session(
+                bnum=2, 
+                relay_queue=relay_queue, 
+                buffer_name="test_buffer2"
+            )
+            
+            # Verify KernelSession was created with None kernel_name (will default to 'python3')
+            mock_session_class.assert_called_once_with(relay_queue, "test_buffer2", None)
+            mock_session.start.assert_called_once()
+
 
 if __name__ == '__main__':
     pytest.main([__file__])

@@ -1,4 +1,5 @@
 import asyncio
+import re
 import pynvim
 
 
@@ -25,15 +26,16 @@ class NvimUIManager:
         """
         return self.nvim.current.buffer.number
 
-    async def get_cell_code(self, bnum, lnum):
+    async def get_cell_code(self, bnum, lnum, delimiter_pattern=r'^#+\s*%%'):
         """
         Find the code cell containing the given line number and return its content.
         
-        Code cells are delimited by #%% separators or file boundaries.
+        Code cells are delimited by configurable patterns or file boundaries.
 
         Args:
             bnum (int): Buffer number
             lnum (int): Line number (1-indexed)
+            delimiter_pattern (str): Regex pattern for cell delimiters
 
         Returns:
             str: The code within the current cell
@@ -73,7 +75,7 @@ class NvimUIManager:
         cell_start = 0
         for i in range(current_line_idx, -1, -1):
             line = lines[i].strip()
-            if line.startswith('#%%'):
+            if re.match(delimiter_pattern, line):
                 if i == current_line_idx:
                     # If we're on a cell delimiter line, start from the next line
                     cell_start = i + 1
@@ -86,7 +88,7 @@ class NvimUIManager:
         cell_end = len(lines)
         for i in range(current_line_idx + 1, len(lines)):
             line = lines[i].strip()
-            if line.startswith('#%%'):
+            if re.match(delimiter_pattern, line):
                 cell_end = i
                 break
 
@@ -164,21 +166,34 @@ class NvimUIManager:
         Present a list of items to the user and get their choice.
 
         Args:
-            items (list): List of items to choose from
+            items (list): List of items to choose from. Can be:
+                         - List of strings (for backward compatibility)
+                         - List of dictionaries with 'display_name' and 'value' keys
 
         Returns:
-            str: The selected item, or None if cancelled
+            str/dict: The selected item's value if dictionary, or the item itself if string.
+                     Returns None if cancelled.
         """
         if not items:
             return None
 
         if len(items) == 1:
-            return items[0]
+            # For single item, return the value if it's a dict, otherwise return the item
+            item = items[0]
+            if isinstance(item, dict) and 'value' in item:
+                return item['value']
+            return item
 
         # Create a numbered list for display
         choices = []
         for i, item in enumerate(items, 1):
-            choices.append(f"{i}. {item}")
+            if isinstance(item, dict):
+                # Use display_name if available, fallback to value or string representation
+                display_text = item.get('display_name', item.get('value', str(item)))
+            else:
+                # Backward compatibility: treat as string
+                display_text = str(item)
+            choices.append(f"{i}. {display_text}")
 
         # Display choices and get user input
         choice_text = '\n'.join(choices)
@@ -189,7 +204,11 @@ class NvimUIManager:
             choice_num = int(response.strip())
             
             if 1 <= choice_num <= len(items):
-                return items[choice_num - 1]
+                selected_item = items[choice_num - 1]
+                # Return the value if it's a dict, otherwise return the item itself
+                if isinstance(selected_item, dict) and 'value' in selected_item:
+                    return selected_item['value']
+                return selected_item
             else:
                 return None
         except (ValueError, KeyboardInterrupt):

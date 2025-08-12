@@ -12,6 +12,30 @@
 -- :UpdateRemotePlugins
 
 -- ============================================================================
+-- WEB SERVER CONFIGURATION
+-- ============================================================================
+
+-- Configure web server host and port (optional)
+-- These can be set globally or through lazy.nvim opts
+vim.g.quench_nvim_web_server_host = "127.0.0.1"  -- Default: 127.0.0.1
+vim.g.quench_nvim_web_server_port = 8765         -- Default: 8765
+
+-- For remote development, you might want:
+-- vim.g.quench_nvim_web_server_host = "0.0.0.0"  -- Listen on all interfaces
+-- vim.g.quench_nvim_web_server_port = 8766       -- Use different port
+
+-- Alternative: Set through lazy.nvim opts (if using lazy.nvim):
+-- {
+--   "your-username/quench.nvim",
+--   opts = {
+--     web_server = {
+--       host = "0.0.0.0",  -- For remote development
+--       port = 8766,
+--     }
+--   }
+-- }
+
+-- ============================================================================
 -- KEY MAPPINGS
 -- ============================================================================
 
@@ -51,7 +75,9 @@ vim.api.nvim_create_autocmd("FileType", {
     if not vim.g.quench_help_shown then
       vim.defer_fn(function()
         print("Quench: Use <leader>r to execute Python cells (marked with #%%)")
-        print("Quench: Browser output at http://127.0.0.1:8765")
+        local host = vim.g.quench_nvim_web_server_host or "127.0.0.1"
+        local port = vim.g.quench_nvim_web_server_port or 8765
+        print("Quench: Browser output at http://" .. host .. ":" .. port)
       end, 1000) -- Show after 1 second
       vim.g.quench_help_shown = true
     end
@@ -177,7 +203,9 @@ vim.api.nvim_create_user_command("QuenchHelp", function()
   print("  :QuenchStatus         - Show plugin status")
   print("  :QuenchStop          - Stop plugin")
   print("  :QuenchExample       - Open example file")
-  print("  Browser: http://127.0.0.1:8765?kernel_id=<ID>")
+  local host = vim.g.quench_nvim_web_server_host or "127.0.0.1"
+  local port = vim.g.quench_nvim_web_server_port or 8765
+  print("  Browser: http://" .. host .. ":" .. port .. "?kernel_id=<ID>")
 end, { desc = "Show Quench help" })
 
 -- ============================================================================
