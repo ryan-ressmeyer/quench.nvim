@@ -681,31 +681,9 @@ class TestQuenchMain:
             assert error_count >= 5  # At least 5 commands should report buffer access errors
 
     @pytest.mark.asyncio
-    async def test_run_cell_async_kernel_selection_workflow(self):
-        """Test the integrated kernel selection workflow in _run_cell_async."""
+    async def test_run_cell_async_with_provided_kernel(self):
+        """Test that _run_cell_async uses the provided kernel name correctly."""
         plugin = Quench(self.mock_nvim)
-        
-        # Mock the kernel manager methods
-        plugin.kernel_manager.get_session_for_buffer = AsyncMock(return_value=None)  # No existing session
-        
-        # Mock discovered kernelspecs
-        mock_kernelspecs = [
-            {
-                'name': 'neovim_python',
-                'display_name': "Neovim's Python",
-                'argv': ['/usr/bin/python3', '-m', 'ipykernel_launcher', '-f', '{connection_file}']
-            },
-            {
-                'name': 'conda-env',
-                'display_name': 'Python 3 (conda-env)',
-                'argv': ['/home/user/anaconda3/bin/python', '-m', 'ipykernel_launcher', '-f', '{connection_file}']
-            }
-        ]
-        
-        plugin.kernel_manager.discover_kernelspecs = AsyncMock(return_value=mock_kernelspecs)
-        
-        # Mock user choice - user selects the second kernel
-        plugin.ui_manager.get_user_choice = AsyncMock(return_value='conda-env')
         
         # Mock session creation
         mock_session = AsyncMock()
@@ -716,25 +694,18 @@ class TestQuenchMain:
         plugin.web_server.start = AsyncMock()
         plugin.web_server_started = True
         
-        # Execute cell
-        await plugin._run_cell_async(1, "print('hello')")
+        # Execute cell with a specific kernel name
+        kernel_name = 'conda-env'
+        await plugin._run_cell_async(1, "print('hello')", kernel_name)
         
-        # Verify the workflow
-        plugin.kernel_manager.get_session_for_buffer.assert_called_once_with(1)
-        plugin.kernel_manager.discover_kernelspecs.assert_called_once()
-        
-        # Verify UI manager was called with kernel choices
-        expected_choices = [
-            {'display_name': "Neovim's Python", 'value': 'neovim_python'},
-            {'display_name': 'Python 3 (conda-env)', 'value': 'conda-env'}
-        ]
-        plugin.ui_manager.get_user_choice.assert_called_once_with(expected_choices)
-        
-        # Verify session was created with selected kernel
+        # Verify session was created with the provided kernel name
         plugin.kernel_manager.get_or_create_session.assert_called_once()
         call_args = plugin.kernel_manager.get_or_create_session.call_args
         assert call_args[0][0] == 1  # buffer number
         assert call_args[0][3] == 'conda-env'  # kernel_name
+        
+        # Verify code was executed
+        mock_session.execute.assert_called_once_with("print('hello')")
 
     @pytest.mark.asyncio
     async def test_run_cell_async_single_kernel_no_prompt(self):
@@ -765,7 +736,7 @@ class TestQuenchMain:
         plugin.web_server_started = True
         
         # Execute cell
-        await plugin._run_cell_async(1, "print('hello')")
+        await plugin._run_cell_async(1, "print('hello')", 'python3')
         
         # Verify no user choice was prompted (since only one kernel)
         plugin.ui_manager.get_user_choice = AsyncMock()
@@ -794,7 +765,7 @@ class TestQuenchMain:
         plugin.web_server_started = True
         
         # Execute cell
-        await plugin._run_cell_async(1, "print('hello')")
+        await plugin._run_cell_async(1, "print('hello')", 'python3')
         
         # Verify kernel discovery was not called since session exists
         plugin.kernel_manager.discover_kernelspecs = AsyncMock()
@@ -844,7 +815,7 @@ class TestQuenchMain:
         plugin.web_server_started = True
         
         # Execute cell
-        await plugin._run_cell_async(1, "print('hello')")
+        await plugin._run_cell_async(1, "print('hello')", 'python3')
         
         # Verify session was created with first kernel as fallback
         plugin.kernel_manager.get_or_create_session.assert_called_once()
@@ -872,7 +843,7 @@ class TestQuenchMain:
         plugin.web_server_started = True
         
         # Execute cell
-        await plugin._run_cell_async(1, "print('hello')")
+        await plugin._run_cell_async(1, "print('hello')", 'python3')
         
         # Verify session was created with None kernel_name (default fallback)
         plugin.kernel_manager.get_or_create_session.assert_called_once()

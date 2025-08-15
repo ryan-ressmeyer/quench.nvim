@@ -360,7 +360,7 @@ class KernelSessionManager:
             }
         return result
 
-    async def discover_kernelspecs(self) -> List[Dict[str, str]]:
+    def discover_kernelspecs(self) -> List[Dict[str, str]]:
         """
         Discover all available kernel specifications on the system.
 

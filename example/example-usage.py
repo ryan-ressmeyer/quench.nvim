@@ -1,4 +1,4 @@
-#%% 
+#%%
 # Quench Plugin Example Usage
 # This file demonstrates all core functionality of the Quench Neovim plugin
 # for interactive Python development with cell-based execution.
