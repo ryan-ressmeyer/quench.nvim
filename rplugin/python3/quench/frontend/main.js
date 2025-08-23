@@ -188,6 +188,10 @@ class QuenchClient {
                 this.handleStatus(message);
                 break;
                 
+            case 'kernel_restarted':
+                this.handleKernelRestarted(message);
+                break;
+                
             default:
                 console.log(`Unhandled message type: ${msgType}`);
         }
@@ -374,6 +378,46 @@ class QuenchClient {
             console.log(`Kernel execution state: ${executionState}`);
             // Could update UI to show kernel busy/idle state
         }
+    }
+
+    handleKernelRestarted(message) {
+        console.log('Kernel restarted message received:', message);
+        
+        // Create a prominent notification cell
+        const notificationDiv = document.createElement('div');
+        notificationDiv.className = 'cell kernel-restart-notification';
+        
+        const notificationContent = document.createElement('div');
+        notificationContent.className = 'notification-content';
+        
+        const notificationIcon = document.createElement('div');
+        notificationIcon.className = 'notification-icon';
+        notificationIcon.textContent = '🔄';
+        
+        const notificationText = document.createElement('div');
+        notificationText.className = 'notification-text';
+        notificationText.innerHTML = '<strong>Kernel Restarted</strong><br>All variables and imported modules have been reset.';
+        
+        const notificationTimestamp = document.createElement('div');
+        notificationTimestamp.className = 'notification-timestamp';
+        notificationTimestamp.textContent = new Date().toLocaleTimeString();
+        
+        notificationContent.appendChild(notificationIcon);
+        notificationContent.appendChild(notificationText);
+        notificationContent.appendChild(notificationTimestamp);
+        notificationDiv.appendChild(notificationContent);
+        
+        // Add to the output area
+        this.outputArea.appendChild(notificationDiv);
+        
+        // Scroll to show the notification
+        notificationDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        
+        // Clear all existing cells since kernel state is reset
+        // But keep the restart notification
+        const cells = this.outputArea.querySelectorAll('.cell:not(.kernel-restart-notification)');
+        cells.forEach(cell => cell.remove());
+        this.cells.clear();
     }
 
     createCell(msgId, code) {

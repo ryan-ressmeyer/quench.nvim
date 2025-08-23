@@ -850,6 +850,152 @@ class TestQuenchMain:
         call_args = plugin.kernel_manager.get_or_create_session.call_args
         assert call_args[0][3] is None  # kernel_name should be None as fallback
 
+    def test_interrupt_kernel_command_no_session(self):
+        """Test QuenchInterruptKernel command when no session exists for the buffer."""
+        plugin = Quench(self.mock_nvim)
+        
+        # Mock get_session_for_buffer to return None (no session)
+        with patch.object(plugin, '_interrupt_kernel_async', new_callable=AsyncMock) as mock_interrupt:
+            plugin.interrupt_kernel_command()
+            
+            # Verify async method was called with correct buffer number
+            mock_interrupt.assert_called_once_with(1)  # buffer number from mock
+
+    def test_reset_kernel_command_no_session(self):
+        """Test QuenchResetKernel command when no session exists for the buffer."""
+        plugin = Quench(self.mock_nvim)
+        
+        # Mock _reset_kernel_async
+        with patch.object(plugin, '_reset_kernel_async', new_callable=AsyncMock) as mock_reset:
+            plugin.reset_kernel_command()
+            
+            # Verify async method was called with correct buffer number
+            mock_reset.assert_called_once_with(1)  # buffer number from mock
+
+    def test_interrupt_kernel_command_error_handling(self):
+        """Test QuenchInterruptKernel command error handling."""
+        # Mock to raise an exception during buffer access
+        mock_buffer = Mock()
+        mock_buffer.number = Mock(side_effect=Exception("Buffer error"))
+        self.mock_nvim.current.buffer = mock_buffer
+        
+        plugin = Quench(self.mock_nvim)
+        
+        # Should handle exception gracefully
+        plugin.interrupt_kernel_command()
+        
+        # Should have error message
+        assert any("Error accessing buffer" in msg for msg in self.mock_nvim.error_messages)
+
+    def test_reset_kernel_command_error_handling(self):
+        """Test QuenchResetKernel command error handling."""
+        # Mock to raise an exception during buffer access
+        mock_buffer = Mock()
+        mock_buffer.number = Mock(side_effect=Exception("Buffer error"))
+        self.mock_nvim.current.buffer = mock_buffer
+        
+        plugin = Quench(self.mock_nvim)
+        
+        # Should handle exception gracefully
+        plugin.reset_kernel_command()
+        
+        # Should have error message
+        assert any("Error accessing buffer" in msg for msg in self.mock_nvim.error_messages)
+
+    @pytest.mark.asyncio
+    async def test_interrupt_kernel_async_no_session(self):
+        """Test _interrupt_kernel_async when no session exists for the buffer."""
+        plugin = Quench(self.mock_nvim)
+        
+        # Mock get_session_for_buffer to return None
+        plugin.kernel_manager.get_session_for_buffer = AsyncMock(return_value=None)
+        
+        # Should handle gracefully
+        await plugin._interrupt_kernel_async(1)
+        
+        # Should have called get_session_for_buffer
+        plugin.kernel_manager.get_session_for_buffer.assert_called_once_with(1)
+
+    @pytest.mark.asyncio
+    async def test_interrupt_kernel_async_with_session(self):
+        """Test _interrupt_kernel_async when session exists."""
+        plugin = Quench(self.mock_nvim)
+        
+        # Mock existing session
+        mock_session = AsyncMock()
+        mock_session.interrupt = AsyncMock()
+        plugin.kernel_manager.get_session_for_buffer = AsyncMock(return_value=mock_session)
+        
+        # Execute interrupt
+        await plugin._interrupt_kernel_async(1)
+        
+        # Verify session interrupt was called
+        plugin.kernel_manager.get_session_for_buffer.assert_called_once_with(1)
+        mock_session.interrupt.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_interrupt_kernel_async_error_handling(self):
+        """Test _interrupt_kernel_async error handling when interrupt fails."""
+        plugin = Quench(self.mock_nvim)
+        
+        # Mock session that raises an error during interrupt
+        mock_session = AsyncMock()
+        mock_session.interrupt = AsyncMock(side_effect=Exception("Interrupt failed"))
+        plugin.kernel_manager.get_session_for_buffer = AsyncMock(return_value=mock_session)
+        
+        # Should handle exception gracefully
+        await plugin._interrupt_kernel_async(1)
+        
+        # Verify interrupt was attempted
+        mock_session.interrupt.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_reset_kernel_async_no_session(self):
+        """Test _reset_kernel_async when no session exists for the buffer."""
+        plugin = Quench(self.mock_nvim)
+        
+        # Mock get_session_for_buffer to return None
+        plugin.kernel_manager.get_session_for_buffer = AsyncMock(return_value=None)
+        
+        # Should handle gracefully
+        await plugin._reset_kernel_async(1)
+        
+        # Should have called get_session_for_buffer
+        plugin.kernel_manager.get_session_for_buffer.assert_called_once_with(1)
+
+    @pytest.mark.asyncio
+    async def test_reset_kernel_async_with_session(self):
+        """Test _reset_kernel_async when session exists."""
+        plugin = Quench(self.mock_nvim)
+        
+        # Mock existing session
+        mock_session = AsyncMock()
+        mock_session.restart = AsyncMock()
+        plugin.kernel_manager.get_session_for_buffer = AsyncMock(return_value=mock_session)
+        
+        # Execute reset
+        await plugin._reset_kernel_async(1)
+        
+        # Verify session restart was called
+        plugin.kernel_manager.get_session_for_buffer.assert_called_once_with(1)
+        mock_session.restart.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_reset_kernel_async_error_handling(self):
+        """Test _reset_kernel_async error handling when restart fails."""
+        plugin = Quench(self.mock_nvim)
+        
+        # Mock session that raises an error during restart
+        mock_session = AsyncMock()
+        mock_session.restart = AsyncMock(side_effect=Exception("Restart failed"))
+        plugin.kernel_manager.get_session_for_buffer = AsyncMock(return_value=mock_session)
+        
+        # Should handle exception gracefully
+        await plugin._reset_kernel_async(1)
+        
+        # Verify restart was attempted
+        mock_session.restart.assert_called_once()
+
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

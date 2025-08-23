@@ -147,6 +147,43 @@
             50% { opacity: 0.5; }
             100% { opacity: 1; }
         }
+
+        /* Kernel restart notification styles */
+        .kernel-restart-notification {
+            border-left-color: #ff6b35 !important;
+            background-color: #2d1b1f !important;
+            margin-bottom: 30px;
+        }
+
+        .notification-content {
+            display: flex;
+            align-items: center;
+            padding: 20px;
+            background-color: #2d1b1f;
+        }
+
+        .notification-icon {
+            font-size: 2em;
+            margin-right: 15px;
+            color: #ff6b35;
+        }
+
+        .notification-text {
+            flex-grow: 1;
+            color: #ffccbc;
+        }
+
+        .notification-text strong {
+            color: #ff6b35;
+            font-size: 1.1em;
+        }
+
+        .notification-timestamp {
+            font-size: 0.8em;
+            color: #999;
+            margin-left: 15px;
+            align-self: flex-start;
+        }
     </style>
 </head>
 <body>

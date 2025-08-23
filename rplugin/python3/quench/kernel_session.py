@@ -168,6 +168,63 @@ class KernelSession:
             self._logger.error(f"Error executing code in kernel {self.kernel_id[:8]}: {e}")
             raise
 
+    async def interrupt(self):
+        """
+        Send an interrupt signal to the running kernel.
+        """
+        if not self.km:
+            raise RuntimeError("Kernel manager is not available. Call start() first.")
+        
+        try:
+            self.km.interrupt_kernel()
+            self._logger.info(f"Interrupted kernel {self.kernel_id[:8]}")
+        except Exception as e:
+            self._logger.error(f"Error interrupting kernel {self.kernel_id[:8]}: {e}")
+            raise
+
+    async def restart(self):
+        """
+        Restart the kernel and clear the output cache.
+        Sends a notification to the frontend about the restart.
+        """
+        if not self.km:
+            raise RuntimeError("Kernel manager is not available. Call start() first.")
+        
+        try:
+            self._logger.info(f"Restarting kernel {self.kernel_id[:8]}")
+            
+            # Restart the kernel
+            await self.km.restart_kernel()
+            
+            # Clear the output cache to remove previous state
+            self.output_cache.clear()
+            
+            # Create a custom message for the frontend
+            from datetime import datetime, timezone
+            restart_message = {
+                "header": {
+                    "msg_id": f"restart_{self.kernel_id}_{datetime.now(timezone.utc).isoformat()}",
+                    "msg_type": "kernel_restarted",
+                    "username": "quench",
+                    "session": self.kernel_id,
+                    "date": datetime.now(timezone.utc),
+                    "version": "5.3"
+                },
+                "msg_type": "kernel_restarted",
+                "content": {"status": "ok"},
+                "metadata": {},
+                "buffers": []
+            }
+            
+            # Add the message to the relay queue
+            await self.relay_queue.put((self.kernel_id, restart_message))
+            
+            self._logger.info(f"Kernel {self.kernel_id[:8]} restarted successfully")
+            
+        except Exception as e:
+            self._logger.error(f"Error restarting kernel {self.kernel_id[:8]}: {e}")
+            raise
+
     async def _listen_iopub(self):
         """
         Continuously listen to the kernel's IOPub channel for messages.

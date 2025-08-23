@@ -516,6 +516,92 @@ class Quench:
             self._logger.debug(f"Message structure: {message}")
             self._logger.debug(f"Exception traceback: {traceback.format_exc()}")
 
+    async def _interrupt_kernel_async(self, current_bnum):
+        """
+        Async implementation for interrupting a kernel.
+        
+        Args:
+            current_bnum: Buffer number
+        """
+        self._logger.debug(f"Starting async interrupt for buffer {current_bnum}")
+        
+        # Get existing session for this buffer
+        session = await self.kernel_manager.get_session_for_buffer(current_bnum)
+        
+        if session is None:
+            def notify_no_session():
+                self._notify_user("No active kernel session found for this buffer", level='error')
+            
+            try:
+                self.nvim.async_call(notify_no_session)
+            except:
+                pass
+            return
+        
+        try:
+            await session.interrupt()
+            
+            def notify_success():
+                self._notify_user(f"Kernel interrupted successfully")
+            
+            try:
+                self.nvim.async_call(notify_success)
+            except:
+                pass
+                
+        except Exception as e:
+            self._logger.error(f"Failed to interrupt kernel: {e}")
+            def notify_error():
+                self._notify_user(f"Failed to interrupt kernel: {e}", level='error')
+            
+            try:
+                self.nvim.async_call(notify_error)
+            except:
+                pass
+
+    async def _reset_kernel_async(self, current_bnum):
+        """
+        Async implementation for resetting a kernel.
+        
+        Args:
+            current_bnum: Buffer number
+        """
+        self._logger.debug(f"Starting async reset for buffer {current_bnum}")
+        
+        # Get existing session for this buffer
+        session = await self.kernel_manager.get_session_for_buffer(current_bnum)
+        
+        if session is None:
+            def notify_no_session():
+                self._notify_user("No active kernel session found for this buffer", level='error')
+            
+            try:
+                self.nvim.async_call(notify_no_session)
+            except:
+                pass
+            return
+        
+        try:
+            await session.restart()
+            
+            def notify_success():
+                self._notify_user(f"Kernel reset successfully - all variables and state cleared")
+            
+            try:
+                self.nvim.async_call(notify_success)
+            except:
+                pass
+                
+        except Exception as e:
+            self._logger.error(f"Failed to reset kernel: {e}")
+            def notify_error():
+                self._notify_user(f"Failed to reset kernel: {e}", level='error')
+            
+            try:
+                self.nvim.async_call(notify_error)
+            except:
+                pass
+
     @pynvim.command('QuenchStatus', sync=True)
     def status_command(self):
         """
@@ -1312,6 +1398,60 @@ class Quench:
         except Exception as e:
             self._logger.error(f"Error in QuenchDebug: {e}")
             self.nvim.err_write(f"Debug error: {e}\n")
+
+    @pynvim.command('QuenchInterruptKernel', sync=True)
+    def interrupt_kernel_command(self):
+        """
+        Send an interrupt signal to the kernel associated with the current buffer.
+        """
+        try:
+            self._logger.info("QuenchInterruptKernel called")
+            
+            # Get current buffer number
+            try:
+                current_bnum = self.nvim.current.buffer.number
+            except Exception as e:
+                self._logger.error(f"Error getting buffer number: {e}")
+                self._notify_user(f"Error accessing buffer: {e}", level='error')
+                return
+            
+            # Run async operation
+            try:
+                asyncio.run(self._interrupt_kernel_async(current_bnum))
+            except Exception as e:
+                self._logger.error(f"Error in _interrupt_kernel_async: {e}")
+                self._notify_user(f"Interrupt failed: {e}", level='error')
+                
+        except Exception as e:
+            self._logger.error(f"Error in QuenchInterruptKernel: {e}")
+            self.nvim.err_write(f"Interrupt kernel error: {e}\n")
+
+    @pynvim.command('QuenchResetKernel', sync=True)
+    def reset_kernel_command(self):
+        """
+        Restart the kernel associated with the current buffer and clear its state.
+        """
+        try:
+            self._logger.info("QuenchResetKernel called")
+            
+            # Get current buffer number
+            try:
+                current_bnum = self.nvim.current.buffer.number
+            except Exception as e:
+                self._logger.error(f"Error getting buffer number: {e}")
+                self._notify_user(f"Error accessing buffer: {e}", level='error')
+                return
+            
+            # Run async operation
+            try:
+                asyncio.run(self._reset_kernel_async(current_bnum))
+            except Exception as e:
+                self._logger.error(f"Error in _reset_kernel_async: {e}")
+                self._notify_user(f"Kernel reset failed: {e}", level='error')
+                
+        except Exception as e:
+            self._logger.error(f"Error in QuenchResetKernel: {e}")
+            self.nvim.err_write(f"Reset kernel error: {e}\n")
 
     @pynvim.function('SayHello', sync=True)
     def say_hello_function(self, args):

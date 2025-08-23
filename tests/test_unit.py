@@ -664,6 +664,119 @@ class TestKernelSessionManager:
             mock_session_class.assert_called_once_with(relay_queue, "test_buffer2", None)
             mock_session.start.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_kernel_session_interrupt_without_manager(self):
+        """Test KernelSession interrupt method when kernel manager is not available."""
+        from quench.kernel_session import KernelSession
+        
+        relay_queue = asyncio.Queue()
+        session = KernelSession(relay_queue, "test_buffer")
+        
+        # Test interrupt without starting (should raise error)
+        with pytest.raises(RuntimeError, match="Kernel manager is not available"):
+            await session.interrupt()
+
+    @pytest.mark.asyncio
+    async def test_kernel_session_restart_without_manager(self):
+        """Test KernelSession restart method when kernel manager is not available."""
+        from quench.kernel_session import KernelSession
+        
+        relay_queue = asyncio.Queue()
+        session = KernelSession(relay_queue, "test_buffer")
+        
+        # Test restart without starting (should raise error)
+        with pytest.raises(RuntimeError, match="Kernel manager is not available"):
+            await session.restart()
+
+    @pytest.mark.asyncio
+    async def test_kernel_session_interrupt_with_manager(self):
+        """Test KernelSession interrupt method when kernel manager is available."""
+        from quench.kernel_session import KernelSession
+        from unittest.mock import Mock, AsyncMock
+        
+        relay_queue = asyncio.Queue()
+        session = KernelSession(relay_queue, "test_buffer")
+        
+        # Mock the kernel manager
+        mock_km = Mock()
+        mock_km.interrupt_kernel = Mock()
+        session.km = mock_km
+        
+        # Test successful interrupt
+        await session.interrupt()
+        
+        # Verify interrupt_kernel was called
+        mock_km.interrupt_kernel.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_kernel_session_interrupt_error_handling(self):
+        """Test KernelSession interrupt method error handling."""
+        from quench.kernel_session import KernelSession
+        from unittest.mock import Mock
+        
+        relay_queue = asyncio.Queue()
+        session = KernelSession(relay_queue, "test_buffer")
+        
+        # Mock the kernel manager to raise an error
+        mock_km = Mock()
+        mock_km.interrupt_kernel = Mock(side_effect=Exception("Interrupt failed"))
+        session.km = mock_km
+        
+        # Test that error is properly raised
+        with pytest.raises(Exception, match="Interrupt failed"):
+            await session.interrupt()
+
+    @pytest.mark.asyncio
+    async def test_kernel_session_restart_with_manager(self):
+        """Test KernelSession restart method when kernel manager is available."""
+        from quench.kernel_session import KernelSession
+        from unittest.mock import Mock, AsyncMock
+        
+        relay_queue = asyncio.Queue()
+        session = KernelSession(relay_queue, "test_buffer")
+        
+        # Mock the kernel manager
+        mock_km = AsyncMock()
+        mock_km.restart_kernel = AsyncMock()
+        session.km = mock_km
+        
+        # Add some items to output cache
+        session.output_cache = ["item1", "item2"]
+        
+        # Test successful restart
+        await session.restart()
+        
+        # Verify restart_kernel was called
+        mock_km.restart_kernel.assert_called_once()
+        
+        # Verify output cache was cleared
+        assert len(session.output_cache) == 0
+        
+        # Verify restart message was queued
+        assert not relay_queue.empty()
+        kernel_id, message = await relay_queue.get()
+        assert kernel_id == session.kernel_id
+        assert message["msg_type"] == "kernel_restarted"
+        assert message["content"]["status"] == "ok"
+
+    @pytest.mark.asyncio
+    async def test_kernel_session_restart_error_handling(self):
+        """Test KernelSession restart method error handling."""
+        from quench.kernel_session import KernelSession
+        from unittest.mock import AsyncMock
+        
+        relay_queue = asyncio.Queue()
+        session = KernelSession(relay_queue, "test_buffer")
+        
+        # Mock the kernel manager to raise an error
+        mock_km = AsyncMock()
+        mock_km.restart_kernel = AsyncMock(side_effect=Exception("Restart failed"))
+        session.km = mock_km
+        
+        # Test that error is properly raised
+        with pytest.raises(Exception, match="Restart failed"):
+            await session.restart()
+
 
 if __name__ == '__main__':
     pytest.main([__file__])
