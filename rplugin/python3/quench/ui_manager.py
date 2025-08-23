@@ -54,16 +54,22 @@ class NvimUIManager:
                 current_buf = self.nvim.current.buffer
                 if current_buf.number == bnum:
                     buffer = current_buf
-        except AttributeError:
-            # Fallback to current buffer
-            buffer = self.nvim.current.buffer
+        except (AttributeError, TypeError, pynvim.api.NvimError):
+            # Fallback to current buffer or return empty on error
+            try:
+                buffer = self.nvim.current.buffer
+            except (AttributeError, pynvim.api.NvimError):
+                return ""
         
         if buffer is None:
             return ""
 
         # Get all lines from the buffer
-        lines = buffer[:]
-        if not lines:
+        try:
+            lines = buffer[:]
+            if not lines:
+                return ""
+        except (AttributeError, TypeError, pynvim.api.NvimError):
             return ""
 
         # Convert to 0-indexed for Python list access
@@ -144,22 +150,29 @@ class NvimUIManager:
                 current_buf = self.nvim.current.buffer
                 if current_buf.number == bnum:
                     buffer = current_buf
-        except AttributeError:
-            # Fallback to current buffer
-            buffer = self.nvim.current.buffer
+        except (AttributeError, TypeError, pynvim.api.NvimError):
+            # Fallback to current buffer or return on error
+            try:
+                buffer = self.nvim.current.buffer
+            except (AttributeError, pynvim.api.NvimError):
+                return
         
         if buffer is None:
             return
 
-        # Make buffer modifiable temporarily
-        self.nvim.command(f'buffer {bnum}')
-        self.nvim.command('setlocal modifiable')
-        
-        # Clear existing content and write new lines
-        buffer[:] = lines if isinstance(lines, list) else [lines]
-        
-        # Make buffer non-modifiable again
-        self.nvim.command('setlocal nomodifiable')
+        try:
+            # Make buffer modifiable temporarily
+            self.nvim.command(f'buffer {bnum}')
+            self.nvim.command('setlocal modifiable')
+            
+            # Clear existing content and write new lines
+            buffer[:] = lines if isinstance(lines, list) else [lines]
+            
+            # Make buffer non-modifiable again
+            self.nvim.command('setlocal nomodifiable')
+        except (AttributeError, TypeError, pynvim.api.NvimError):
+            # If we can't write to the buffer, silently fail
+            pass
 
     async def get_user_choice(self, items):
         """
@@ -201,6 +214,8 @@ class NvimUIManager:
         
         try:
             response = self.nvim.call('input', prompt)
+            if response is None or response == '':
+                return None
             choice_num = int(response.strip())
             
             if 1 <= choice_num <= len(items):
@@ -211,5 +226,5 @@ class NvimUIManager:
                 return selected_item
             else:
                 return None
-        except (ValueError, KeyboardInterrupt):
+        except (ValueError, KeyboardInterrupt, AttributeError):
             return None
