@@ -412,12 +412,6 @@ class QuenchClient {
         
         // Scroll to show the notification
         notificationDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        
-        // Clear all existing cells since kernel state is reset
-        // But keep the restart notification
-        const cells = this.outputArea.querySelectorAll('.cell:not(.kernel-restart-notification)');
-        cells.forEach(cell => cell.remove());
-        this.cells.clear();
     }
 
     createCell(msgId, code) {

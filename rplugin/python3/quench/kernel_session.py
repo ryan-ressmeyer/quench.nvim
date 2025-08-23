@@ -176,7 +176,7 @@ class KernelSession:
             raise RuntimeError("Kernel manager is not available. Call start() first.")
         
         try:
-            self.km.interrupt_kernel()
+            await self.km.interrupt_kernel()
             self._logger.info(f"Interrupted kernel {self.kernel_id[:8]}")
         except Exception as e:
             self._logger.error(f"Error interrupting kernel {self.kernel_id[:8]}: {e}")
