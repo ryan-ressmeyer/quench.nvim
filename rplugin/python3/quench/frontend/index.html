@@ -4,6 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quench - Neovim IPython Integration</title>
+    
+    <!-- Libraries for rich content rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/ansi_up@5.1.0/ansi_up.min.js"></script>
+    
     <style>
         body {
             font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
@@ -97,6 +104,14 @@
             color: #000000;
             padding: 10px;
             border-radius: 4px;
+            border: 1px solid #333;
+        }
+
+        .output-latex {
+            color: #d4d4d4;
+            padding: 10px;
+            border-radius: 4px;
+            background-color: #2d2d30;
             border: 1px solid #333;
         }
 

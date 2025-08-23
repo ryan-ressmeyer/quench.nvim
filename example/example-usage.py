@@ -135,6 +135,7 @@ html_content = """
 
 print("Displaying HTML content...")
 HTML(html_content)
+#%%
 
 # Display Markdown
 markdown_content = """
@@ -157,11 +158,21 @@ Quench supports **Markdown** rendering too!
 
 print("Displaying Markdown content...")
 Markdown(markdown_content)
-
+#%%
 # Display LaTeX math
 print("Displaying mathematical equations...")
 Math(r'\int_{-\infty}^{\infty} e^{-x^2} dx = \sqrt{\pi}')
-
+#%%
+# Example ansi escape sequences for colored text
+print("Demonstrating ANSI colored text:")
+print("\033[91mThis is red text\033[0m")
+# carriage return example
+import time
+print("Progress: 0%", end="")
+for i in range(1, 11):
+    time.sleep(0.2)
+    print(f"\rProgress: {i*10}%", end="")
+print("\nDone!")
 #%%
 # Cell 8: Plugin status and management
 # This shows how to monitor and control Quench

@@ -8,6 +8,7 @@ class QuenchClient {
         this.kernelIdElement = null;
         this.kernelSelect = null;
         this.refreshButton = null;
+        this.ansiUp = new AnsiUp(); // ANSI code converter
         
         this.init();
     }
@@ -225,13 +226,11 @@ class QuenchClient {
             return;
         }
         
-        // Create a cell on-demand if one doesn't exist for this parent message ID
+        // Create a cell on-demand if one doesn't exist
         if (!this.cells.has(parentMsgId)) {
-            console.log(`Creating on-demand cell for orphaned stream message: ${parentMsgId.slice(0,8)}`);
             const cellElement = this.createCell(parentMsgId, '# Code executed previously');
             this.cells.set(parentMsgId, cellElement);
             this.outputArea.appendChild(cellElement);
-            console.log(`Cell created for stream, total cells: ${this.cells.size}`);
         }
         
         const cell = this.cells.get(parentMsgId);
@@ -247,7 +246,6 @@ class QuenchClient {
             streamDiv.className = 'output-item output-text';
             streamDiv.setAttribute('data-stream', streamName);
             
-            // Add metadata header
             const metadata = document.createElement('div');
             metadata.className = 'output-metadata';
             metadata.textContent = `${streamName}:`;
@@ -260,9 +258,52 @@ class QuenchClient {
             outputDiv.appendChild(streamDiv);
         }
         
-        // Append text to existing stream
         const textDiv = streamDiv.querySelector('.output-text');
-        textDiv.textContent += text;
+        
+        // Handle carriage returns properly
+        if (text.includes('\r')) {
+            // Convert the incoming text to HTML first
+            const convertedText = this.ansiUp.ansi_to_html(text);
+            let currentHtml = textDiv.innerHTML;
+            
+            // Split by \r, but we need to handle this more carefully
+            const parts = text.split('\r');
+            
+            // Process each part
+            for (let i = 0; i < parts.length; i++) {
+                const part = parts[i];
+                
+                if (i === 0) {
+                    // First part: just append normally
+                    currentHtml += this.ansiUp.ansi_to_html(part);
+                } else {
+                    // Subsequent parts: \r should overwrite the current line
+                    // Find the position after the last newline
+                    const lastNewlineIndex = currentHtml.lastIndexOf('\n');
+                    const lastBrIndex = currentHtml.lastIndexOf('<br>');
+                    
+                    // Use whichever is more recent
+                    const cutIndex = Math.max(lastNewlineIndex, lastBrIndex);
+                    
+                    if (cutIndex !== -1) {
+                        // Cut after the last newline/br and replace with new content
+                        if (lastBrIndex > lastNewlineIndex) {
+                            currentHtml = currentHtml.substring(0, lastBrIndex + 4) + this.ansiUp.ansi_to_html(part);
+                        } else {
+                            currentHtml = currentHtml.substring(0, lastNewlineIndex + 1) + this.ansiUp.ansi_to_html(part);
+                        }
+                    } else {
+                        // No previous newlines, this is the first line - replace everything
+                        currentHtml = this.ansiUp.ansi_to_html(part);
+                    }
+                }
+            }
+            
+            textDiv.innerHTML = currentHtml;
+        } else {
+            // Original behavior: just append the new text
+            textDiv.innerHTML += this.ansiUp.ansi_to_html(text);
+        }
     }
 
     handleDisplayData(message) {
@@ -316,12 +357,12 @@ class QuenchClient {
         const traceback = message.content?.traceback || [];
         
         // Clean up ANSI escape codes from traceback
-        const cleanTraceback = traceback.map(line => this.stripAnsiCodes(line));
+        const cleanTraceback = traceback.map(line => this.ansiUp.ansi_to_html(line));
         const errorText = `${errorName}: ${errorValue}\n${cleanTraceback.join('\n')}`;
         
         const errorPre = document.createElement('pre');
         errorPre.className = 'output-text';
-        errorPre.textContent = errorText;
+        errorPre.innerHTML = errorText;
         errorDiv.appendChild(errorPre);
         
         outputDiv.appendChild(errorDiv);
@@ -371,6 +412,7 @@ class QuenchClient {
         // Priority order for MIME types
         const mimeOrder = [
             'text/html',
+            'text/markdown',
             'image/svg+xml',
             'image/png',
             'image/jpeg',
@@ -407,6 +449,13 @@ class QuenchClient {
                 container.appendChild(htmlDiv);
                 break;
                 
+            case 'text/markdown':
+                const mdDiv = document.createElement('div');
+                mdDiv.className = 'output-html'; // Reuse same styling as HTML
+                mdDiv.innerHTML = marked.parse(Array.isArray(data) ? data.join('') : data);
+                container.appendChild(mdDiv);
+                break;
+                
             case 'image/png':
             case 'image/jpeg':
                 const img = document.createElement('img');
@@ -423,11 +472,31 @@ class QuenchClient {
                 break;
                 
             case 'text/latex':
-                // For now, render as text. In a full implementation, you'd use MathJax or KaTeX
-                const latexDiv = document.createElement('pre');
-                latexDiv.className = 'output-text';
-                latexDiv.textContent = Array.isArray(data) ? data.join('') : data;
-                container.appendChild(latexDiv);
+                const latexDiv = document.createElement('div');
+                latexDiv.className = 'output-latex';
+                
+                // Get the raw latex string
+                let latexString = Array.isArray(data) ? data.join('') : data;
+                
+                // Strip leading/trailing $ delimiters that IPython includes
+                if (latexString.startsWith('$') && latexString.endsWith('$')) {
+                    latexString = latexString.substring(1, latexString.length - 1);
+                }
+                
+                try {
+                    // Render the cleaned string
+                    katex.render(latexString, latexDiv, {
+                        throwOnError: false,
+                        displayMode: true // Use display mode for centered, larger math
+                    });
+                    container.appendChild(latexDiv);
+                } catch (e) {
+                    // Fallback for any other errors
+                    const errDiv = document.createElement('pre');
+                    errDiv.className = 'output-text output-error'; // Add error class for visibility
+                    errDiv.textContent = `KaTeX Error: ${e.message}\n\nOriginal text: ${data}`;
+                    container.appendChild(errDiv);
+                }
                 break;
                 
             case 'application/json':
@@ -447,11 +516,6 @@ class QuenchClient {
         }
     }
 
-    stripAnsiCodes(text) {
-        // Remove ANSI escape codes (colors, formatting, etc.)
-        // This regex matches ANSI escape sequences
-        return text.replace(/\x1b\[[0-9;]*m/g, '');
-    }
 
     updateStatus(message, status) {
         this.statusElement.textContent = message;
