@@ -52,6 +52,13 @@ class Quench:
         
         self._logger.info("Quench plugin initialized")
 
+    def _notify_user(self, message, level='info'):
+        """Send a single-line notification to the user."""
+        if level == 'info':
+            self.nvim.out_write(message + '\n')
+        elif level == 'error':
+            self.nvim.err_write(message + '\n')
+
     def _get_cell_delimiter(self):
         """
         Get the cell delimiter pattern from Neovim global variable.
@@ -157,7 +164,6 @@ class Quench:
         """
         try:
             self._logger.info("QuenchRunCell called - starting execution")
-            self.nvim.out_write("QuenchRunCell: Starting execution...\n")
             
             # Get all the synchronous Neovim data we need first (from main thread)
             try:
@@ -171,37 +177,37 @@ class Quench:
                 
             except Exception as e:
                 self._logger.error(f"Error getting buffer data: {e}")
-                self.nvim.err_write(f"Error accessing buffer: {e}\n")
+                self._notify_user(f"Error accessing buffer: {e}", level='error')
                 return
             
             # Extract cell code synchronously
             try:
                 delimiter_pattern = self._get_cell_delimiter()
-                cell_code, cell_end_line = self._extract_cell_code_sync(lines, current_line, delimiter_pattern)
+                cell_code, cell_start_line, cell_end_line = self._extract_cell_code_sync(lines, current_line, delimiter_pattern)
                 if not cell_code.strip():
-                    self.nvim.out_write("No code found in current cell\n")
+                    self._notify_user("No code found in current cell")
                     return
                 
                 self._logger.debug(f"Cell code extracted: {len(cell_code)} characters")
-                self.nvim.out_write(f"Executing cell ({len(cell_code)} chars)...\n")
+                self._notify_user(f"Quench: Executing cell (lines {cell_start_line}-{cell_end_line})")
                 
             except Exception as e:
                 self._logger.error(f"Error extracting cell code: {e}")
-                self.nvim.err_write(f"Error extracting cell: {e}\n")
+                self._notify_user(f"Error extracting cell: {e}", level='error')
                 return
             
             # Select kernel synchronously
             try:
                 kernel_name = self._get_or_select_kernel_sync(current_bnum)
                 if not kernel_name:
-                    self.nvim.err_write("Kernel selection failed. Aborting execution.\n")
+                    self._notify_user("Kernel selection failed. Aborting execution.", level='error')
                     return
                 
                 self._logger.info(f"Using kernel: {kernel_name}")
                 
             except Exception as e:
                 self._logger.error(f"Error selecting kernel: {e}")
-                self.nvim.err_write(f"Error selecting kernel: {e}\n")
+                self._notify_user(f"Error selecting kernel: {e}", level='error')
                 return
             
             # Now run the async parts with the data we collected
@@ -212,38 +218,35 @@ class Quench:
                     if loop.is_running():
                         # Create task in existing loop
                         task = asyncio.create_task(self._run_cell_async(current_bnum, cell_code, kernel_name))
-                        self.nvim.out_write("Cell execution started in background...\n")
                         
                         # Add error callback to the task
                         def handle_task_exception(task):
                             if task.exception():
                                 self._logger.error(f"Background task failed: {task.exception()}")
                                 try:
-                                    self.nvim.async_call(lambda: self.nvim.err_write(f"Execution failed: {task.exception()}\n"))
+                                    self.nvim.async_call(lambda: self._notify_user(f"Execution failed: {task.exception()}", level='error'))
                                 except:
                                     pass
                         
                         task.add_done_callback(handle_task_exception)
                     else:
                         # Run in existing loop
-                        self.nvim.out_write("Running in existing event loop...\n")
                         loop.run_until_complete(self._run_cell_async(current_bnum, cell_code, kernel_name))
                 except RuntimeError:
                     # No event loop, create one
-                    self.nvim.out_write("Creating new event loop...\n")
                     asyncio.run(self._run_cell_async(current_bnum, cell_code, kernel_name))
                     
             except Exception as e:
                 self._logger.error(f"Error in async execution: {e}")
                 import traceback
                 self._logger.error(f"Traceback: {traceback.format_exc()}")
-                self.nvim.err_write(f"Execution error: {e}\n")
+                self._notify_user(f"Execution error: {e}", level='error')
                 
         except Exception as e:
             self._logger.error(f"Error in QuenchRunCell: {e}")
             import traceback
             self._logger.error(f"Traceback: {traceback.format_exc()}")
-            self.nvim.err_write(f"Quench error: {e}\n")
+            self._notify_user(f"Quench error: {e}", level='error')
 
     def _get_or_select_kernel_sync(self, bnum):
         """
@@ -300,10 +303,10 @@ class Quench:
             delimiter_pattern: Regex pattern for cell delimiters
             
         Returns:
-            tuple: (cell_code, cell_end_line) where cell_end_line is 1-indexed
+            tuple: (cell_code, cell_start_line, cell_end_line) where lines are 1-indexed
         """
         if not lines:
-            return "", 0
+            return "", 0, 0
 
         # Convert to 0-indexed for Python list access
         current_line_idx = lnum - 1
@@ -340,7 +343,7 @@ class Quench:
         while cell_lines and not cell_lines[-1].strip():
             cell_lines.pop()
 
-        return '\n'.join(cell_lines), cell_end
+        return '\n'.join(cell_lines), cell_start + 1, cell_end
 
     async def _run_cell_async(self, current_bnum, cell_code, kernel_name):
         """
@@ -363,7 +366,7 @@ class Quench:
                 # Show web server info to user (use async_call for thread safety)
                 server_url = f"http://{self.web_server.host}:{self.web_server.port}"
                 def notify_server_started():
-                    self.nvim.out_write(f"Quench web server started at {server_url}\n")
+                    self._notify_user(f"Quench web server started at {server_url}")
                 
                 try:
                     self.nvim.async_call(notify_server_started)
@@ -374,7 +377,7 @@ class Quench:
             except Exception as e:
                 self._logger.error(f"Failed to start web server: {e}")
                 def notify_error():
-                    self.nvim.err_write(f"Error starting web server: {e}\n")
+                    self._notify_user(f"Error starting web server: {e}", level='error')
                 try:
                     self.nvim.async_call(notify_error)
                 except:
@@ -408,20 +411,6 @@ class Quench:
         # Execute the code
         self._logger.info(f"Executing cell code in kernel {session.kernel_id[:8]}")
         await session.execute(cell_code)
-        
-        # Show execution feedback to user
-        def notify_execution():
-            if self.web_server_started:
-                kernel_url = f"http://{self.web_server.host}:{self.web_server.port}?kernel_id={session.kernel_id}"
-                self.nvim.out_write(f"Code executed - view output at: {kernel_url}\n")
-            else:
-                self.nvim.out_write("Code executed - check output buffer\n")
-        
-        try:
-            self.nvim.async_call(notify_execution)
-        except:
-            # If async_call fails, just log it
-            self._logger.info("Code execution completed")
 
     async def _message_relay_loop(self):
         """
@@ -593,7 +582,6 @@ class Quench:
         """
         try:
             self._logger.info("QuenchRunCellAdvance called - starting execution")
-            self.nvim.out_write("QuenchRunCellAdvance: Starting execution...\n")
             
             # Get current position and buffer data
             try:
@@ -604,36 +592,37 @@ class Quench:
                 
             except Exception as e:
                 self._logger.error(f"Error getting buffer data: {e}")
-                self.nvim.err_write(f"Error accessing buffer: {e}\n")
+                self._notify_user(f"Error accessing buffer: {e}", level='error')
                 return
             
             # Extract cell code and get end line
             try:
                 delimiter_pattern = self._get_cell_delimiter()
-                cell_code, cell_end_line = self._extract_cell_code_sync(lines, current_line, delimiter_pattern)
+                cell_code, cell_start_line, cell_end_line = self._extract_cell_code_sync(lines, current_line, delimiter_pattern)
                 if not cell_code.strip():
-                    self.nvim.out_write("No code found in current cell\n")
+                    self._notify_user("No code found in current cell")
                     return
                 
                 self._logger.debug(f"Cell code extracted: {len(cell_code)} characters, ends at line {cell_end_line}")
+                self._notify_user(f"Quench: Executing cell (lines {cell_start_line}-{cell_end_line})")
                 
             except Exception as e:
                 self._logger.error(f"Error extracting cell code: {e}")
-                self.nvim.err_write(f"Error extracting cell: {e}\n")
+                self._notify_user(f"Error extracting cell: {e}", level='error')
                 return
             
             # Select kernel synchronously
             try:
                 kernel_name = self._get_or_select_kernel_sync(current_bnum)
                 if not kernel_name:
-                    self.nvim.err_write("Kernel selection failed. Aborting execution.\n")
+                    self._notify_user("Kernel selection failed. Aborting execution.", level='error')
                     return
                 
                 self._logger.info(f"Using kernel: {kernel_name}")
                 
             except Exception as e:
                 self._logger.error(f"Error selecting kernel: {e}")
-                self.nvim.err_write(f"Error selecting kernel: {e}\n")
+                self._notify_user(f"Error selecting kernel: {e}", level='error')
                 return
             
             # Execute the cell
@@ -650,7 +639,7 @@ class Quench:
                             if task.exception():
                                 self._logger.error(f"Background task failed: {task.exception()}")
                                 try:
-                                    self.nvim.async_call(lambda: self.nvim.err_write(f"Execution failed: {task.exception()}\n"))
+                                    self.nvim.async_call(lambda: self._notify_user(f"Execution failed: {task.exception()}", level='error'))
                                 except:
                                     pass
                             else:
@@ -659,7 +648,6 @@ class Quench:
                                     try:
                                         advance_to_line = cell_end_line + 1 if cell_end_line < len(lines) else len(lines)
                                         self.nvim.current.window.cursor = (advance_to_line, 0)
-                                        self.nvim.out_write(f"Cursor advanced to line {advance_to_line}\n")
                                     except Exception as e:
                                         self._logger.error(f"Error advancing cursor: {e}")
                                 
@@ -669,29 +657,26 @@ class Quench:
                                     pass
                         
                         task.add_done_callback(handle_task_and_advance)
-                        self.nvim.out_write("Cell execution started in background...\n")
                     else:
                         # Run in existing loop
                         loop.run_until_complete(self._run_cell_async(current_bnum, cell_code, kernel_name))
                         # Advance cursor after execution
                         advance_to_line = cell_end_line + 1 if cell_end_line < len(lines) else len(lines)
                         self.nvim.current.window.cursor = (advance_to_line, 0)
-                        self.nvim.out_write(f"Cursor advanced to line {advance_to_line}\n")
                 except RuntimeError:
                     # No event loop, create one
                     asyncio.run(self._run_cell_async(current_bnum, cell_code, kernel_name))
                     # Advance cursor after execution
                     advance_to_line = cell_end_line + 1 if cell_end_line < len(lines) else len(lines)
                     self.nvim.current.window.cursor = (advance_to_line, 0)
-                    self.nvim.out_write(f"Cursor advanced to line {advance_to_line}\n")
                     
             except Exception as e:
                 self._logger.error(f"Error in async execution: {e}")
-                self.nvim.err_write(f"Execution error: {e}\n")
+                self._notify_user(f"Execution error: {e}", level='error')
                 
         except Exception as e:
             self._logger.error(f"Error in QuenchRunCellAdvance: {e}")
-            self.nvim.err_write(f"Quench error: {e}\n")
+            self._notify_user(f"Quench error: {e}", level='error')
 
     @pynvim.command("QuenchRunSelection", range=True, sync=True)
     def run_selection(self, range_info):
@@ -703,7 +688,6 @@ class Quench:
         """
         try:
             self._logger.info("QuenchRunSelection called - starting execution")
-            self.nvim.out_write("QuenchRunSelection: Starting execution...\n")
             
             # Get range information
             try:
@@ -716,29 +700,29 @@ class Quench:
                 selected_code = '\n'.join(selected_lines)
                 
                 if not selected_code.strip():
-                    self.nvim.out_write("No code found in selection\n")
+                    self._notify_user("No code found in selection")
                     return
                 
                 self._logger.debug(f"Selected code extracted: {len(selected_code)} characters from lines {start_line}-{end_line}")
-                self.nvim.out_write(f"Executing selection ({len(selected_code)} chars)...\n")
+                self._notify_user(f"Quench: Executing lines {start_line}-{end_line}")
                 
             except Exception as e:
                 self._logger.error(f"Error extracting selection: {e}")
-                self.nvim.err_write(f"Error extracting selection: {e}\n")
+                self._notify_user(f"Error extracting selection: {e}", level='error')
                 return
             
             # Select kernel synchronously
             try:
                 kernel_name = self._get_or_select_kernel_sync(current_bnum)
                 if not kernel_name:
-                    self.nvim.err_write("Kernel selection failed. Aborting execution.\n")
+                    self._notify_user("Kernel selection failed. Aborting execution.", level='error')
                     return
                 
                 self._logger.info(f"Using kernel: {kernel_name}")
                 
             except Exception as e:
                 self._logger.error(f"Error selecting kernel: {e}")
-                self.nvim.err_write(f"Error selecting kernel: {e}\n")
+                self._notify_user(f"Error selecting kernel: {e}", level='error')
                 return
             
             # Execute the selection
@@ -749,14 +733,13 @@ class Quench:
                     if loop.is_running():
                         # Create task in existing loop
                         task = asyncio.create_task(self._run_cell_async(current_bnum, selected_code, kernel_name))
-                        self.nvim.out_write("Selection execution started in background...\n")
                         
                         # Add error callback to the task
                         def handle_task_exception(task):
                             if task.exception():
                                 self._logger.error(f"Background task failed: {task.exception()}")
                                 try:
-                                    self.nvim.async_call(lambda: self.nvim.err_write(f"Execution failed: {task.exception()}\n"))
+                                    self.nvim.async_call(lambda: self._notify_user(f"Execution failed: {task.exception()}", level='error'))
                                 except:
                                     pass
                         
@@ -770,11 +753,11 @@ class Quench:
                     
             except Exception as e:
                 self._logger.error(f"Error in async execution: {e}")
-                self.nvim.err_write(f"Execution error: {e}\n")
+                self._notify_user(f"Execution error: {e}", level='error')
                 
         except Exception as e:
             self._logger.error(f"Error in QuenchRunSelection: {e}")
-            self.nvim.err_write(f"Quench error: {e}\n")
+            self._notify_user(f"Quench error: {e}", level='error')
 
     @pynvim.command("QuenchRunLine", sync=True)
     def run_line(self):
@@ -783,7 +766,6 @@ class Quench:
         """
         try:
             self._logger.info("QuenchRunLine called - starting execution")
-            self.nvim.out_write("QuenchRunLine: Starting execution...\n")
             
             # Get current line
             try:
@@ -795,29 +777,29 @@ class Quench:
                 current_line_code = buffer[current_line_num - 1]
                 
                 if not current_line_code.strip():
-                    self.nvim.out_write("Current line is empty\n")
+                    self._notify_user("Current line is empty")
                     return
                 
                 self._logger.debug(f"Current line code: {current_line_code}")
-                self.nvim.out_write(f"Executing line {current_line_num}: {current_line_code.strip()[:50]}...\n")
+                self._notify_user(f"Quench: Executing line {current_line_num}")
                 
             except Exception as e:
                 self._logger.error(f"Error extracting current line: {e}")
-                self.nvim.err_write(f"Error extracting current line: {e}\n")
+                self._notify_user(f"Error extracting current line: {e}", level='error')
                 return
             
             # Select kernel synchronously
             try:
                 kernel_name = self._get_or_select_kernel_sync(current_bnum)
                 if not kernel_name:
-                    self.nvim.err_write("Kernel selection failed. Aborting execution.\n")
+                    self._notify_user("Kernel selection failed. Aborting execution.", level='error')
                     return
                 
                 self._logger.info(f"Using kernel: {kernel_name}")
                 
             except Exception as e:
                 self._logger.error(f"Error selecting kernel: {e}")
-                self.nvim.err_write(f"Error selecting kernel: {e}\n")
+                self._notify_user(f"Error selecting kernel: {e}", level='error')
                 return
             
             # Execute the line
@@ -828,14 +810,13 @@ class Quench:
                     if loop.is_running():
                         # Create task in existing loop
                         task = asyncio.create_task(self._run_cell_async(current_bnum, current_line_code, kernel_name))
-                        self.nvim.out_write("Line execution started in background...\n")
                         
                         # Add error callback to the task
                         def handle_task_exception(task):
                             if task.exception():
                                 self._logger.error(f"Background task failed: {task.exception()}")
                                 try:
-                                    self.nvim.async_call(lambda: self.nvim.err_write(f"Execution failed: {task.exception()}\n"))
+                                    self.nvim.async_call(lambda: self._notify_user(f"Execution failed: {task.exception()}", level='error'))
                                 except:
                                     pass
                         
@@ -849,11 +830,11 @@ class Quench:
                     
             except Exception as e:
                 self._logger.error(f"Error in async execution: {e}")
-                self.nvim.err_write(f"Execution error: {e}\n")
+                self._notify_user(f"Execution error: {e}", level='error')
                 
         except Exception as e:
             self._logger.error(f"Error in QuenchRunLine: {e}")
-            self.nvim.err_write(f"Quench error: {e}\n")
+            self._notify_user(f"Quench error: {e}", level='error')
 
     @pynvim.command("QuenchRunAbove", sync=True)
     def run_above(self):
@@ -862,7 +843,6 @@ class Quench:
         """
         try:
             self._logger.info("QuenchRunAbove called - starting execution")
-            self.nvim.out_write("QuenchRunAbove: Starting execution...\n")
             
             # Get buffer data
             try:
@@ -873,7 +853,7 @@ class Quench:
                 
             except Exception as e:
                 self._logger.error(f"Error getting buffer data: {e}")
-                self.nvim.err_write(f"Error accessing buffer: {e}\n")
+                self._notify_user(f"Error accessing buffer: {e}", level='error')
                 return
             
             # Find all cells above current position
@@ -882,31 +862,31 @@ class Quench:
                 cells_to_run = self._extract_cells_above(lines, current_line, delimiter_pattern)
                 
                 if not cells_to_run:
-                    self.nvim.out_write("No cells found above current position\n")
+                    self._notify_user("No cells found above current position")
                     return
                 
                 # Combine all cell codes
                 combined_code = '\n\n'.join(cells_to_run)
                 self._logger.debug(f"Combined code from {len(cells_to_run)} cells: {len(combined_code)} characters")
-                self.nvim.out_write(f"Executing {len(cells_to_run)} cells above current position...\n")
+                self._notify_user("Quench: Executing all cells above cursor")
                 
             except Exception as e:
                 self._logger.error(f"Error extracting cells above: {e}")
-                self.nvim.err_write(f"Error extracting cells: {e}\n")
+                self._notify_user(f"Error extracting cells: {e}", level='error')
                 return
             
             # Select kernel synchronously
             try:
                 kernel_name = self._get_or_select_kernel_sync(current_bnum)
                 if not kernel_name:
-                    self.nvim.err_write("Kernel selection failed. Aborting execution.\n")
+                    self._notify_user("Kernel selection failed. Aborting execution.", level='error')
                     return
                 
                 self._logger.info(f"Using kernel: {kernel_name}")
                 
             except Exception as e:
                 self._logger.error(f"Error selecting kernel: {e}")
-                self.nvim.err_write(f"Error selecting kernel: {e}\n")
+                self._notify_user(f"Error selecting kernel: {e}", level='error')
                 return
             
             # Execute the combined code
@@ -917,14 +897,13 @@ class Quench:
                     if loop.is_running():
                         # Create task in existing loop
                         task = asyncio.create_task(self._run_cell_async(current_bnum, combined_code, kernel_name))
-                        self.nvim.out_write("Execution started in background...\n")
                         
                         # Add error callback to the task
                         def handle_task_exception(task):
                             if task.exception():
                                 self._logger.error(f"Background task failed: {task.exception()}")
                                 try:
-                                    self.nvim.async_call(lambda: self.nvim.err_write(f"Execution failed: {task.exception()}\n"))
+                                    self.nvim.async_call(lambda: self._notify_user(f"Execution failed: {task.exception()}", level='error'))
                                 except:
                                     pass
                         
@@ -938,11 +917,11 @@ class Quench:
                     
             except Exception as e:
                 self._logger.error(f"Error in async execution: {e}")
-                self.nvim.err_write(f"Execution error: {e}\n")
+                self._notify_user(f"Execution error: {e}", level='error')
                 
         except Exception as e:
             self._logger.error(f"Error in QuenchRunAbove: {e}")
-            self.nvim.err_write(f"Quench error: {e}\n")
+            self._notify_user(f"Quench error: {e}", level='error')
 
     @pynvim.command("QuenchRunBelow", sync=True)
     def run_below(self):
@@ -951,7 +930,6 @@ class Quench:
         """
         try:
             self._logger.info("QuenchRunBelow called - starting execution")
-            self.nvim.out_write("QuenchRunBelow: Starting execution...\n")
             
             # Get buffer data
             try:
@@ -962,7 +940,7 @@ class Quench:
                 
             except Exception as e:
                 self._logger.error(f"Error getting buffer data: {e}")
-                self.nvim.err_write(f"Error accessing buffer: {e}\n")
+                self._notify_user(f"Error accessing buffer: {e}", level='error')
                 return
             
             # Find all cells from current position to end
@@ -971,31 +949,31 @@ class Quench:
                 cells_to_run = self._extract_cells_below(lines, current_line, delimiter_pattern)
                 
                 if not cells_to_run:
-                    self.nvim.out_write("No cells found from current position to end\n")
+                    self._notify_user("No cells found from current position to end")
                     return
                 
                 # Combine all cell codes
                 combined_code = '\n\n'.join(cells_to_run)
                 self._logger.debug(f"Combined code from {len(cells_to_run)} cells: {len(combined_code)} characters")
-                self.nvim.out_write(f"Executing {len(cells_to_run)} cells from current position to end...\n")
+                self._notify_user("Quench: Executing all cells from cursor to end of file")
                 
             except Exception as e:
                 self._logger.error(f"Error extracting cells below: {e}")
-                self.nvim.err_write(f"Error extracting cells: {e}\n")
+                self._notify_user(f"Error extracting cells: {e}", level='error')
                 return
             
             # Select kernel synchronously
             try:
                 kernel_name = self._get_or_select_kernel_sync(current_bnum)
                 if not kernel_name:
-                    self.nvim.err_write("Kernel selection failed. Aborting execution.\n")
+                    self._notify_user("Kernel selection failed. Aborting execution.", level='error')
                     return
                 
                 self._logger.info(f"Using kernel: {kernel_name}")
                 
             except Exception as e:
                 self._logger.error(f"Error selecting kernel: {e}")
-                self.nvim.err_write(f"Error selecting kernel: {e}\n")
+                self._notify_user(f"Error selecting kernel: {e}", level='error')
                 return
             
             # Execute the combined code
@@ -1006,14 +984,13 @@ class Quench:
                     if loop.is_running():
                         # Create task in existing loop
                         task = asyncio.create_task(self._run_cell_async(current_bnum, combined_code, kernel_name))
-                        self.nvim.out_write("Execution started in background...\n")
                         
                         # Add error callback to the task
                         def handle_task_exception(task):
                             if task.exception():
                                 self._logger.error(f"Background task failed: {task.exception()}")
                                 try:
-                                    self.nvim.async_call(lambda: self.nvim.err_write(f"Execution failed: {task.exception()}\n"))
+                                    self.nvim.async_call(lambda: self._notify_user(f"Execution failed: {task.exception()}", level='error'))
                                 except:
                                     pass
                         
@@ -1027,11 +1004,11 @@ class Quench:
                     
             except Exception as e:
                 self._logger.error(f"Error in async execution: {e}")
-                self.nvim.err_write(f"Execution error: {e}\n")
+                self._notify_user(f"Execution error: {e}", level='error')
                 
         except Exception as e:
             self._logger.error(f"Error in QuenchRunBelow: {e}")
-            self.nvim.err_write(f"Quench error: {e}\n")
+            self._notify_user(f"Quench error: {e}", level='error')
 
     @pynvim.command("QuenchRunAll", sync=True)
     def run_all(self):
@@ -1040,7 +1017,6 @@ class Quench:
         """
         try:
             self._logger.info("QuenchRunAll called - starting execution")
-            self.nvim.out_write("QuenchRunAll: Starting execution...\n")
             
             # Get buffer data
             try:
@@ -1050,7 +1026,7 @@ class Quench:
                 
             except Exception as e:
                 self._logger.error(f"Error getting buffer data: {e}")
-                self.nvim.err_write(f"Error accessing buffer: {e}\n")
+                self._notify_user(f"Error accessing buffer: {e}", level='error')
                 return
             
             # Find all cells in the buffer
@@ -1059,31 +1035,31 @@ class Quench:
                 all_cells = self._extract_all_cells(lines, delimiter_pattern)
                 
                 if not all_cells:
-                    self.nvim.out_write("No cells found in buffer\n")
+                    self._notify_user("No cells found in buffer")
                     return
                 
                 # Combine all cell codes
                 combined_code = '\n\n'.join(all_cells)
                 self._logger.debug(f"Combined code from {len(all_cells)} cells: {len(combined_code)} characters")
-                self.nvim.out_write(f"Executing all {len(all_cells)} cells in buffer...\n")
+                self._notify_user("Quench: Executing all cells in the buffer")
                 
             except Exception as e:
                 self._logger.error(f"Error extracting all cells: {e}")
-                self.nvim.err_write(f"Error extracting cells: {e}\n")
+                self._notify_user(f"Error extracting cells: {e}", level='error')
                 return
             
             # Select kernel synchronously
             try:
                 kernel_name = self._get_or_select_kernel_sync(current_bnum)
                 if not kernel_name:
-                    self.nvim.err_write("Kernel selection failed. Aborting execution.\n")
+                    self._notify_user("Kernel selection failed. Aborting execution.", level='error')
                     return
                 
                 self._logger.info(f"Using kernel: {kernel_name}")
                 
             except Exception as e:
                 self._logger.error(f"Error selecting kernel: {e}")
-                self.nvim.err_write(f"Error selecting kernel: {e}\n")
+                self._notify_user(f"Error selecting kernel: {e}", level='error')
                 return
             
             # Execute the combined code
@@ -1094,14 +1070,13 @@ class Quench:
                     if loop.is_running():
                         # Create task in existing loop
                         task = asyncio.create_task(self._run_cell_async(current_bnum, combined_code, kernel_name))
-                        self.nvim.out_write("Execution started in background...\n")
                         
                         # Add error callback to the task
                         def handle_task_exception(task):
                             if task.exception():
                                 self._logger.error(f"Background task failed: {task.exception()}")
                                 try:
-                                    self.nvim.async_call(lambda: self.nvim.err_write(f"Execution failed: {task.exception()}\n"))
+                                    self.nvim.async_call(lambda: self._notify_user(f"Execution failed: {task.exception()}", level='error'))
                                 except:
                                     pass
                         
@@ -1115,11 +1090,11 @@ class Quench:
                     
             except Exception as e:
                 self._logger.error(f"Error in async execution: {e}")
-                self.nvim.err_write(f"Execution error: {e}\n")
+                self._notify_user(f"Execution error: {e}", level='error')
                 
         except Exception as e:
             self._logger.error(f"Error in QuenchRunAll: {e}")
-            self.nvim.err_write(f"Quench error: {e}\n")
+            self._notify_user(f"Quench error: {e}", level='error')
 
     def _extract_cells_above(self, lines, current_line, delimiter_pattern):
         """
