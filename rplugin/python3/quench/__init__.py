@@ -1417,7 +1417,29 @@ class Quench:
             
             # Run async operation
             try:
-                asyncio.run(self._interrupt_kernel_async(current_bnum))
+                # Try to get or create event loop
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Create task in existing loop
+                        task = asyncio.create_task(self._interrupt_kernel_async(current_bnum))
+                        
+                        # Add error callback to the task
+                        def handle_task_exception(task):
+                            if task.exception():
+                                self._logger.error(f"Interrupt task failed: {task.exception()}")
+                                try:
+                                    self.nvim.async_call(lambda: self._notify_user(f"Interrupt failed: {task.exception()}", level='error'))
+                                except:
+                                    pass
+                        
+                        task.add_done_callback(handle_task_exception)
+                    else:
+                        # Run in existing loop
+                        loop.run_until_complete(self._interrupt_kernel_async(current_bnum))
+                except RuntimeError:
+                    # No event loop, create one
+                    asyncio.run(self._interrupt_kernel_async(current_bnum))
             except Exception as e:
                 self._logger.error(f"Error in _interrupt_kernel_async: {e}")
                 self._notify_user(f"Interrupt failed: {e}", level='error')
@@ -1444,7 +1466,29 @@ class Quench:
             
             # Run async operation
             try:
-                asyncio.run(self._reset_kernel_async(current_bnum))
+                # Try to get or create event loop
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Create task in existing loop
+                        task = asyncio.create_task(self._reset_kernel_async(current_bnum))
+                        
+                        # Add error callback to the task
+                        def handle_task_exception(task):
+                            if task.exception():
+                                self._logger.error(f"Reset task failed: {task.exception()}")
+                                try:
+                                    self.nvim.async_call(lambda: self._notify_user(f"Kernel reset failed: {task.exception()}", level='error'))
+                                except:
+                                    pass
+                        
+                        task.add_done_callback(handle_task_exception)
+                    else:
+                        # Run in existing loop
+                        loop.run_until_complete(self._reset_kernel_async(current_bnum))
+                except RuntimeError:
+                    # No event loop, create one
+                    asyncio.run(self._reset_kernel_async(current_bnum))
             except Exception as e:
                 self._logger.error(f"Error in _reset_kernel_async: {e}")
                 self._notify_user(f"Kernel reset failed: {e}", level='error')
