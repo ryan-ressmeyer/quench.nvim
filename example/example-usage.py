@@ -169,7 +169,7 @@ print("\033[91mThis is red text\033[0m")
 # carriage return example
 import time
 print("Progress: 0%", end="")
-for i in range(1, 100):
+for i in range(1, 11):
     time.sleep(0.2)
     print(f"\rProgress: {i*10}%", end="")
 print("\nDone!")

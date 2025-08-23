@@ -22,6 +22,10 @@
         }
 
         .header {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background-color: #1e1e1e;
             border-bottom: 2px solid #333;
             padding-bottom: 10px;
             margin-bottom: 20px;
@@ -135,6 +139,7 @@
         #output-area {
             max-width: 1200px;
             margin: 0 auto;
+            padding-top: 20px;
         }
 
         .loading {
@@ -184,6 +189,72 @@
             margin-left: 15px;
             align-self: flex-start;
         }
+
+        /* Kernel info dropdown styles */
+        .kernel-details-container {
+            position: relative;
+            display: inline-block;
+            margin-left: 15px;
+        }
+
+        #kernel-info-toggle {
+            background-color: #007acc;
+            color: #ffffff;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        #kernel-info-toggle:hover {
+            background-color: #005a9e;
+        }
+
+        #kernel-info-dropdown {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            z-index: 20;
+            min-width: 300px;
+            margin-top: 5px;
+            background-color: #252526;
+            border: 1px solid #333;
+            border-radius: 4px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .dropdown-content {
+            padding: 12px;
+        }
+
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            padding: 4px 0;
+        }
+
+        .info-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .info-label {
+            color: #9cdcfe;
+            font-weight: 500;
+            min-width: 120px;
+        }
+
+        .info-item span:last-child {
+            color: #d4d4d4;
+            word-break: break-all;
+            text-align: right;
+        }
+
+        .hidden {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -199,6 +270,33 @@
             </div>
             <div class="kernel-info">
                 Active Kernel: <span id="kernel-id">None</span>
+                <div class="kernel-details-container">
+                    <button id="kernel-info-toggle" title="View kernel details">Kernel Info ▾</button>
+                    <div id="kernel-info-dropdown" class="hidden">
+                        <div class="dropdown-content">
+                            <div class="info-item">
+                                <span class="info-label">Kernel UUID:</span>
+                                <span id="info-kernel-uuid">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Kernel Name:</span>
+                                <span id="info-kernel-name">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Python Executable:</span>
+                                <span id="info-python-executable">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Created:</span>
+                                <span id="info-created-at">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Associated Buffers:</span>
+                                <span id="info-buffers">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
         

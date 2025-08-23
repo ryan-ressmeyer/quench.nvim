@@ -8,6 +8,9 @@ class QuenchClient {
         this.kernelIdElement = null;
         this.kernelSelect = null;
         this.refreshButton = null;
+        this.kernelInfoToggle = null;
+        this.kernelInfoDropdown = null;
+        this.kernelDetails = {}; // Store detailed kernel information
         this.ansiUp = new AnsiUp(); // ANSI code converter
         
         this.init();
@@ -20,10 +23,23 @@ class QuenchClient {
         this.kernelIdElement = document.getElementById('kernel-id');
         this.kernelSelect = document.getElementById('kernel-select');
         this.refreshButton = document.getElementById('refresh-kernels');
+        this.kernelInfoToggle = document.getElementById('kernel-info-toggle');
+        this.kernelInfoDropdown = document.getElementById('kernel-info-dropdown');
         
         // Set up event handlers
         this.kernelSelect.addEventListener('change', () => this.onKernelSelected());
         this.refreshButton.addEventListener('click', () => this.loadKernels());
+        this.kernelInfoToggle.addEventListener('click', () => this.toggleKernelInfoDropdown());
+        
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (event) => {
+            if (!this.kernelInfoToggle.contains(event.target) && 
+                !this.kernelInfoDropdown.contains(event.target) && 
+                !this.kernelInfoDropdown.classList.contains('hidden')) {
+                this.kernelInfoDropdown.classList.add('hidden');
+                this.kernelInfoToggle.textContent = 'Kernel Info ▾';
+            }
+        });
         
         // Load available kernels
         this.loadKernels();
@@ -45,6 +61,9 @@ class QuenchClient {
             this.kernelSelect.innerHTML = '<option value="">Select a kernel...</option>';
             
             if (data.sessions && Object.keys(data.sessions).length > 0) {
+                // Store detailed kernel information
+                this.kernelDetails = data.sessions;
+                
                 Object.values(data.sessions).forEach(session => {
                     const option = document.createElement('option');
                     option.value = session.kernel_id;
@@ -81,6 +100,7 @@ class QuenchClient {
         if (selectedKernelId !== this.kernelId) {
             this.kernelId = selectedKernelId;
             this.kernelIdElement.textContent = selectedKernelId;
+            this.updateKernelInfoDropdown(selectedKernelId);
             this.clearOutput();
             this.connect();
         }
@@ -558,6 +578,48 @@ class QuenchClient {
     updateStatus(message, status) {
         this.statusElement.textContent = message;
         this.statusElement.className = `status ${status}`;
+    }
+
+    toggleKernelInfoDropdown() {
+        this.kernelInfoDropdown.classList.toggle('hidden');
+        
+        // Update the button text to show dropdown state
+        const isHidden = this.kernelInfoDropdown.classList.contains('hidden');
+        this.kernelInfoToggle.textContent = isHidden ? 'Kernel Info ▾' : 'Kernel Info ▴';
+    }
+
+    updateKernelInfoDropdown(kernelId) {
+        if (!kernelId || !this.kernelDetails[kernelId]) {
+            // Clear the dropdown if no kernel is selected
+            document.getElementById('info-kernel-uuid').textContent = '-';
+            document.getElementById('info-kernel-name').textContent = '-';
+            document.getElementById('info-python-executable').textContent = '-';
+            document.getElementById('info-created-at').textContent = '-';
+            document.getElementById('info-buffers').textContent = '-';
+            return;
+        }
+
+        const session = this.kernelDetails[kernelId];
+        
+        // Update the dropdown content with session information
+        document.getElementById('info-kernel-uuid').textContent = session.kernel_id;
+        document.getElementById('info-kernel-name').textContent = session.kernel_name || '-';
+        document.getElementById('info-python-executable').textContent = session.python_executable || '-';
+        
+        // Format the creation date
+        if (session.created_at) {
+            const createdDate = new Date(session.created_at);
+            document.getElementById('info-created-at').textContent = createdDate.toLocaleString();
+        } else {
+            document.getElementById('info-created-at').textContent = '-';
+        }
+        
+        // Format associated buffers
+        if (session.associated_buffers && session.associated_buffers.length > 0) {
+            document.getElementById('info-buffers').textContent = session.associated_buffers.join(', ');
+        } else {
+            document.getElementById('info-buffers').textContent = '-';
+        }
     }
 
     showError(message) {

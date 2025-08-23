@@ -39,6 +39,7 @@ class KernelSession:
         self.listener_task: Optional[asyncio.Task] = None
         self.buffer_name = buffer_name or f"kernel_{self.kernel_id[:8]}"
         self.kernel_name = kernel_name or 'python3'
+        self.python_executable = sys.executable
         self.created_at = __import__('datetime').datetime.now()
         self._logger = logging.getLogger(f"quench.kernel.{self.kernel_id[:8]}")
 
@@ -409,6 +410,8 @@ class KernelSessionManager:
             result[kernel_id] = {
                 'kernel_id': kernel_id,
                 'name': session.buffer_name,
+                'kernel_name': session.kernel_name,
+                'python_executable': session.python_executable,
                 'short_id': kernel_id[:8],
                 'created_at': session.created_at.isoformat() if hasattr(session, 'created_at') else None,
                 'associated_buffers': list(session.associated_buffers),
