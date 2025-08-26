@@ -12,6 +12,10 @@ class QuenchClient {
         this.kernelInfoDropdown = null;
         this.kernelDetails = {}; // Store detailed kernel information
         this.ansiUp = new AnsiUp(); // ANSI code converter
+        this.autoscrollButton = null; // Reference to autoscroll toggle button
+        this.isAutoscrollEnabled = true; // Track autoscroll state
+        this.userHasScrolled = false; // Track if user manually scrolled
+        this.programmaticScrollCounter = 0; // Counter to track active programmatic scrolls
         
         this.init();
     }
@@ -25,11 +29,14 @@ class QuenchClient {
         this.refreshButton = document.getElementById('refresh-kernels');
         this.kernelInfoToggle = document.getElementById('kernel-info-toggle');
         this.kernelInfoDropdown = document.getElementById('kernel-info-dropdown');
+        this.autoscrollButton = document.getElementById('autoscroll-toggle');
         
         // Set up event handlers
         this.kernelSelect.addEventListener('change', () => this.onKernelSelected());
         this.refreshButton.addEventListener('click', () => this.loadKernels());
         this.kernelInfoToggle.addEventListener('click', () => this.toggleKernelInfoDropdown());
+        this.autoscrollButton.addEventListener('click', () => this.toggleAutoscroll());
+        window.addEventListener('scroll', () => this.handleScroll());
         
         // Close dropdown when clicking outside
         document.addEventListener('click', (event) => {
@@ -235,9 +242,6 @@ class QuenchClient {
             
             // Add to the output area
             this.outputArea.appendChild(cellElement);
-            
-            // Scroll to the new cell
-            cellElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
         } else {
             console.warn('Execute input message without parent_header.msg_id:', message);
         }
@@ -328,6 +332,9 @@ class QuenchClient {
             // Original behavior: just append the new text
             textDiv.innerHTML += this.ansiUp.ansi_to_html(text);
         }
+        
+        // Auto-scroll to bottom if enabled
+        this.autoscroll();
     }
 
     handleDisplayData(message) {
@@ -353,6 +360,9 @@ class QuenchClient {
         
         // Render different MIME types
         this.renderMimeData(outputDiv, data, metadata);
+        
+        // Auto-scroll to bottom if enabled
+        this.autoscroll();
     }
 
     handleError(message) {
@@ -390,6 +400,9 @@ class QuenchClient {
         errorDiv.appendChild(errorPre);
         
         outputDiv.appendChild(errorDiv);
+        
+        // Auto-scroll to bottom if enabled
+        this.autoscroll();
     }
 
     handleStatus(message) {
@@ -430,8 +443,8 @@ class QuenchClient {
         // Add to the output area
         this.outputArea.appendChild(notificationDiv);
         
-        // Scroll to show the notification
-        notificationDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // Auto-scroll to bottom if enabled
+        this.autoscroll();
     }
 
     createCell(msgId, code) {
@@ -578,6 +591,67 @@ class QuenchClient {
     updateStatus(message, status) {
         this.statusElement.textContent = message;
         this.statusElement.className = `status ${status}`;
+    }
+
+    toggleAutoscroll() {
+        this.isAutoscrollEnabled = !this.isAutoscrollEnabled;
+        this.userHasScrolled = false; // Reset scroll tracking when manually toggled
+        
+        if (this.isAutoscrollEnabled) {
+            this.autoscrollButton.textContent = 'Autoscroll On';
+            this.autoscrollButton.className = 'autoscroll-on';
+            // Immediately scroll to bottom when enabled
+            this.autoscroll();
+        } else {
+            this.autoscrollButton.textContent = 'Autoscroll Off';
+            this.autoscrollButton.className = 'autoscroll-off';
+        }
+    }
+
+    handleScroll() {
+        // Ignore programmatic scrolls
+        if (this.programmaticScrollCounter > 0) {
+            return;
+        }
+        
+        // Check if user is at the bottom of the page (with 20px buffer)
+        const isAtBottom = (window.innerHeight + window.scrollY) >= document.body.offsetHeight - 20;
+        
+        if (isAtBottom) {
+            this.userHasScrolled = false;
+        } else {
+            this.userHasScrolled = true;
+            
+            // If user manually scrolled up and autoscroll is enabled, disable it
+            if (this.isAutoscrollEnabled) {
+                this.isAutoscrollEnabled = false;
+                this.autoscrollButton.textContent = 'Autoscroll Off';
+                this.autoscrollButton.className = 'autoscroll-off';
+            }
+        }
+    }
+
+    autoscroll() {
+        if (this.isAutoscrollEnabled) {
+            // Increment counter to track this programmatic scroll
+            this.programmaticScrollCounter++;
+            
+            // Use requestAnimationFrame to ensure DOM has been updated
+            requestAnimationFrame(() => {
+                // Add a small delay for complex content (images, math rendering, etc.)
+                setTimeout(() => {
+                    window.scrollTo({ 
+                        top: document.body.scrollHeight, 
+                        behavior: 'smooth' 
+                    });
+                    
+                    // Decrement counter after scroll animation completes
+                    setTimeout(() => {
+                        this.programmaticScrollCounter = Math.max(0, this.programmaticScrollCounter - 1);
+                    }, 500);
+                }, 10);
+            });
+        }
     }
 
     toggleKernelInfoDropdown() {

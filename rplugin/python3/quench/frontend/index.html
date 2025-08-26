@@ -255,6 +255,38 @@
         .hidden {
             display: none;
         }
+
+        #autoscroll-toggle {
+            background-color: #007acc;
+            color: #ffffff;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            margin-left: 10px;
+        }
+
+        #autoscroll-toggle:hover {
+            background-color: #005a9e;
+        }
+
+        #autoscroll-toggle.autoscroll-on {
+            background-color: #4CAF50;
+        }
+
+        #autoscroll-toggle.autoscroll-on:hover {
+            background-color: #45a049;
+        }
+
+        #autoscroll-toggle.autoscroll-off {
+            background-color: #f44336;
+        }
+
+        #autoscroll-toggle.autoscroll-off:hover {
+            background-color: #da190b;
+        }
     </style>
 </head>
 <body>
@@ -267,6 +299,7 @@
                     <option value="">Loading kernels...</option>
                 </select>
                 <button id="refresh-kernels">Refresh</button>
+                <button id="autoscroll-toggle" class="autoscroll-on" title="Toggle autoscrolling">Autoscroll On</button>
             </div>
             <div class="kernel-info">
                 Active Kernel: <span id="kernel-id">None</span>
