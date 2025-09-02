@@ -87,28 +87,30 @@ class WebServer:
         """
         Stop the web server and clean up resources.
         """
-        self._logger.info("Stopping web server")
+        self._logger.info("Stopping web server...")
 
         # Close all active WebSocket connections
-        for kernel_id, connections in self.active_connections.items():
-            for ws in list(connections):
-                if not ws.closed:
-                    await ws.close()
+        active_websockets = [ws for conns in self.active_connections.values() for ws in conns if not ws.closed]
+        if active_websockets:
+            self._logger.info(f"Closing {len(active_websockets)} active WebSocket connections.")
+            await asyncio.gather(*(ws.close(code=1000, message='Server shutdown') for ws in active_websockets), return_exceptions=True)
 
         self.active_connections.clear()
 
         # Stop the site
         if self.site:
+            self._logger.info("Stopping web server site...")
             await self.site.stop()
             self.site = None
 
         # Clean up the runner
         if self.runner:
+            self._logger.info("Cleaning up web server runner...")
             await self.runner.cleanup()
             self.runner = None
 
         self.app = None
-        self._logger.info("Web server stopped")
+        self._logger.info("Web server stopped successfully.")
 
     def _get_frontend_path(self) -> str:
         """
