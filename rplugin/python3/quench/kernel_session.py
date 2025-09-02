@@ -103,7 +103,7 @@ class KernelSession:
         # Shutdown the kernel
         if self.km:
             try:
-                await self.km.shutdown_kernel()  # This is also async in jupyter_client 8.x
+                await self.km.shutdown_kernel(now=True)  # This is also async in jupyter_client 8.x
             except Exception as e:
                 self._logger.warning(f"Error shutting down kernel: {e}")
 

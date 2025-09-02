@@ -100,60 +100,124 @@ class Quench:
             self._logger.warning(f"Error getting web server port from Neovim variable: {e}")
             return 8765
 
+    #@pynvim.autocmd("VimLeave", sync=True)
+    #def on_vim_leave(self):
+    #    """
+    #    Handle Vim exit - clean up all resources.
+    #    
+    #    This method is called synchronously when Neovim is shutting down.
+    #    """
+    #    self._logger.info("Vim leaving - starting cleanup")
+    #    import threading
+
+    #    def cleanup_in_thread():
+    #        """Run the async cleanup in a new thread with its own event loop."""
+    #        loop = asyncio.new_event_loop()
+    #        asyncio.set_event_loop(loop)
+    #        try:
+    #            loop.run_until_complete(self._cleanup())
+    #        finally:
+    #            loop.close()
+
+    #    # Run the cleanup in a separate thread and wait for it to complete.
+    #    # This avoids deadlocking the main pynvim event loop.
+    #    thread = threading.Thread(target=cleanup_in_thread)
+    #    thread.start()
+    #    thread.join() # Block until cleanup is finished.
+    #    self._logger.info("Cleanup completed")
+
     @pynvim.autocmd("VimLeave", sync=True)
     def on_vim_leave(self):
         """
         Handle Vim exit - clean up all resources.
-        
-        This method is called synchronously when Neovim is shutting down.
         """
         self._logger.info("Vim leaving - starting cleanup")
-        
-        # Run cleanup in asyncio context
         try:
-            # Create new event loop if none exists
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            
-            # Run the async cleanup
-            loop.run_until_complete(self._cleanup())
-            
+            self._perform_cleanup()
         except Exception as e:
-            self._logger.error(f"Error during cleanup: {e}")
+            self._logger.error(f"Error during VimLeave cleanup: {e}")
         finally:
             self._logger.info("Cleanup completed")
 
-    async def _cleanup(self):
-        """
-        Async cleanup method to shut down all components gracefully.
-        """
-        self._logger.info("Starting async cleanup")
-        
-        # Cancel message relay task
+    async def _cleanup_tasks(self):
+        """Cancels and awaits asyncio tasks that belong to the main event loop."""
+        self._logger.info("Cleaning up main loop tasks")
         if self.message_relay_task and not self.message_relay_task.done():
             self.message_relay_task.cancel()
             try:
                 await self.message_relay_task
             except asyncio.CancelledError:
-                pass
-        
-        # Stop web server
+                pass  # This is expected.
+        self._logger.info("Main loop tasks cleanup completed")
+
+    async def _cleanup_components(self):
+        """Shuts down components that can run in a separate event loop."""
+        self._logger.info("Cleaning up web server and kernels")
         if self.web_server_started:
             try:
                 await self.web_server.stop()
             except Exception as e:
                 self._logger.error(f"Error stopping web server: {e}")
-        
-        # Shutdown all kernel sessions
+
         try:
             await self.kernel_manager.shutdown_all_sessions()
         except Exception as e:
             self._logger.error(f"Error shutting down kernel sessions: {e}")
+        self._logger.info("Web server and kernels cleanup completed")
+
+    def _perform_cleanup(self):
+        """Synchronous wrapper to orchestrate the entire cleanup process."""
+        import threading
         
-        self._logger.info("Async cleanup completed")
+        # Step 1: Clean up tasks on the main pynvim event loop.
+        try:
+            loop = asyncio.get_running_loop()
+            future = asyncio.run_coroutine_threadsafe(self._cleanup_tasks(), loop)
+            future.result(timeout=5)  # Block and wait for tasks to cancel.
+        except Exception as e:
+            self._logger.error(f"Error during task cleanup: {e}")
+
+        # Step 2: Clean up components in a separate thread.
+        def component_cleanup_in_thread():
+            thread_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(thread_loop)
+            try:
+                thread_loop.run_until_complete(self._cleanup_components())
+            finally:
+                thread_loop.close()
+        
+        thread = threading.Thread(target=component_cleanup_in_thread)
+        thread.start()
+        thread.join()  # Wait for the thread to finish.
+
+    #async def _cleanup(self):
+    #    """
+    #    Async cleanup method to shut down all components gracefully.
+    #    """
+    #    self._logger.info("Starting async cleanup")
+    #    
+    #    # Cancel message relay task
+    #    if self.message_relay_task and not self.message_relay_task.done():
+    #        self.message_relay_task.cancel()
+    #        try:
+    #            await self.message_relay_task
+    #        except asyncio.CancelledError:
+    #            pass
+    #    
+    #    # Stop web server
+    #    if self.web_server_started:
+    #        try:
+    #            await self.web_server.stop()
+    #        except Exception as e:
+    #            self._logger.error(f"Error stopping web server: {e}")
+    #    
+    #    # Shutdown all kernel sessions
+    #    try:
+    #        await self.kernel_manager.shutdown_all_sessions()
+    #    except Exception as e:
+    #        self._logger.error(f"Error shutting down kernel sessions: {e}")
+    #    
+    #    self._logger.info("Async cleanup completed")
 
     @pynvim.command("QuenchRunCell", sync=True)
     def run_cell(self):
@@ -376,10 +440,9 @@ class Quench:
                 
             except Exception as e:
                 self._logger.error(f"Failed to start web server: {e}")
-                def notify_error():
-                    self._notify_user(f"Error starting web server: {e}", level='error')
+                # Use a lambda to capture the exception 'e' correctly.
                 try:
-                    self.nvim.async_call(notify_error)
+                    self.nvim.async_call(lambda err=e: self._notify_user(f"Error starting web server: {err}", level='error'))
                 except:
                     pass
                 # Continue without web server
@@ -642,24 +705,45 @@ class Quench:
         """
         Stop all Quench components.
         """
+        self.nvim.out_write("Stopping Quench components...\n")
         try:
-            self.nvim.out_write("Stopping Quench components...\n")
-            
-            # Run cleanup
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            
-            loop.run_until_complete(self._cleanup())
+            self._perform_cleanup()
             self.web_server_started = False
-            
             self.nvim.out_write("Quench stopped.\n")
-            
         except Exception as e:
             self._logger.error(f"Error in QuenchStop: {e}")
             self.nvim.err_write(f"Stop error: {e}\n")
+
+    #@pynvim.command('QuenchStop', sync=True)
+    #def stop_command(self):
+    #    """
+    #    Stop all Quench components.
+    #    """
+    #    self.nvim.out_write("Stopping Quench components...\n")
+    #    import threading
+
+    #    def cleanup_in_thread():
+    #        """Run the async cleanup in a new thread with its own event loop."""
+    #        loop = asyncio.new_event_loop()
+    #        asyncio.set_event_loop(loop)
+    #        try:
+    #            loop.run_until_complete(self._cleanup())
+    #        except Exception as e:
+    #            # Use async_call to safely report errors back to Neovim from the thread.
+    #            self._logger.error(f"Error in cleanup thread: {e}")
+    #            self.nvim.async_call(self.nvim.err_write, f"Stop error: {e}\n")
+    #        finally:
+    #            loop.close()
+    #    
+    #    try:
+    #        thread = threading.Thread(target=cleanup_in_thread)
+    #        thread.start()
+    #        thread.join() # Wait for the cleanup thread to finish.
+    #        self.web_server_started = False
+    #        self.nvim.out_write("Quench stopped.\n")
+    #    except Exception as e:
+    #        self._logger.error(f"Error in QuenchStop: {e}")
+    #        self.nvim.err_write(f"Stop error: {e}\n")
 
     @pynvim.command("QuenchRunCellAdvance", sync=True)
     def run_cell_advance(self):

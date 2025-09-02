@@ -73,7 +73,7 @@ class WebServer:
             await self.runner.setup()
 
             # Create and start the TCP site
-            self.site = web.TCPSite(self.runner, self.host, self.port)
+            self.site = web.TCPSite(self.runner, self.host, self.port, reuse_address=True)
             await self.site.start()
 
             self._logger.info(f"Web server started on http://{self.host}:{self.port}")
