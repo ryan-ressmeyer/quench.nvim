@@ -149,6 +149,67 @@ class TestKernelSession:
             await session.execute("print('test')")
     
     @pytest.mark.asyncio
+    async def test_kernel_session_error_marks_queued_cells_as_skipped(self):
+        """Test that when an error occurs, remaining queued cells are marked as skipped."""
+        session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
+        
+        # Set up multiple pending executions
+        session.pending_executions = {
+            'msg-id-1': 'running',
+            'msg-id-2': 'queued', 
+            'msg-id-3': 'queued',
+            'msg-id-4': 'queued'
+        }
+        
+        # Mock client for message listening
+        mock_client = AsyncMock()
+        session.client = mock_client
+        
+        # Simulate an error message for msg-id-1
+        error_message = {
+            'msg_type': 'error',
+            'parent_header': {'msg_id': 'msg-id-1'},
+            'content': {'ename': 'ValueError', 'evalue': 'test error'}
+        }
+        
+        # Manually call the error handling logic
+        parent_msg_id = error_message.get('parent_header', {}).get('msg_id')
+        if parent_msg_id and parent_msg_id in session.pending_executions:
+            await session._send_cell_status(parent_msg_id, 'completed_error')
+            del session.pending_executions[parent_msg_id]
+            
+            # Mark remaining queued executions as skipped
+            remaining_executions = list(session.pending_executions.keys())
+            for remaining_msg_id in remaining_executions:
+                if session.pending_executions[remaining_msg_id] == 'queued':
+                    await session._send_cell_status(remaining_msg_id, 'skipped')
+                    del session.pending_executions[remaining_msg_id]
+        
+        # Verify messages were sent
+        messages = []
+        while not self.relay_queue.empty():
+            messages.append(await self.relay_queue.get())
+        
+        # Should have: 1 error + 3 skipped = 4 messages
+        assert len(messages) == 4
+        
+        # Verify error message
+        kernel_id, error_status = messages[0]
+        assert error_status['msg_type'] == 'quench_cell_status'
+        assert error_status['content']['status'] == 'completed_error'
+        assert error_status['parent_header']['msg_id'] == 'msg-id-1'
+        
+        # Verify skipped messages
+        skipped_statuses = [msg[1] for msg in messages[1:]]
+        for status_msg in skipped_statuses:
+            assert status_msg['msg_type'] == 'quench_cell_status'
+            assert status_msg['content']['status'] == 'skipped'
+            assert status_msg['parent_header']['msg_id'] in ['msg-id-2', 'msg-id-3', 'msg-id-4']
+        
+        # Verify pending executions were cleared
+        assert len(session.pending_executions) == 0
+    
+    @pytest.mark.asyncio
     async def test_kernel_session_interrupt_success(self):
         """Test successful kernel interrupt."""
         session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)

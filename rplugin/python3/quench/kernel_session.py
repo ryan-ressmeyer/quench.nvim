@@ -122,7 +122,7 @@ class KernelSession:
         
         Args:
             msg_id: The original execute request message ID
-            status: One of 'queued', 'running', 'completed_ok', 'completed_error'
+            status: One of 'queued', 'running', 'completed_ok', 'completed_error', 'skipped'
         """
         from datetime import datetime, timezone
         status_message = {
@@ -329,6 +329,14 @@ class KernelSession:
                         if parent_msg_id and parent_msg_id in self.pending_executions:
                             await self._send_cell_status(parent_msg_id, 'completed_error')
                             del self.pending_executions[parent_msg_id]
+                            
+                            # Mark all remaining pending executions as skipped
+                            # since execution typically stops after an error
+                            remaining_executions = list(self.pending_executions.keys())
+                            for remaining_msg_id in remaining_executions:
+                                if self.pending_executions[remaining_msg_id] == 'queued':
+                                    await self._send_cell_status(remaining_msg_id, 'skipped')
+                                    del self.pending_executions[remaining_msg_id]
                     
                     # Append to output cache
                     self.output_cache.append(message)
