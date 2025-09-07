@@ -1,17 +1,6 @@
+# 🔥 Quench.nvim 💧
 
-  ░██████   ░██     ░██ ░██████████ ░███    ░██   ░██████  ░██     ░██ 
- ░██   ░██  ░██     ░██ ░██         ░████   ░██  ░██   ░██ ░██     ░██ 
-░██     ░██ ░██     ░██ ░██         ░██░██  ░██ ░██        ░██     ░██ 
-░██     ░██ ░██     ░██ ░█████████  ░██ ░██ ░██ ░██        ░██████████ 
-░██     ░██ ░██     ░██ ░██         ░██  ░██░██ ░██        ░██     ░██ 
- ░██   ░██   ░██   ░██  ░██         ░██   ░████  ░██   ░██ ░██     ░██ 
-  ░██████     ░██████   ░██████████ ░██    ░███   ░██████  ░██     ░██ 
-       ░██                                                             
-        ░██                                                            
-                              
-# Quench.nvim 💧
-
-**Interactive Python development in Neovim, inspired by Jupyter notebooks.** 🐍
+**Interactive Python development in Neovim, inspired by Jupyter notebooks.** 📔
 
 Quench brings the fluid, cell-based execution of modern data science tools directly into Neovim. Write Python code in standard `.py` files, execute cells on the fly, and see rich media output like plots, tables, and HTML in a browser—all without leaving your editor. Quench is designed for a seamless, non-blocking, and powerful interactive programming experience. 🚀
 
