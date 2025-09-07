@@ -42,6 +42,10 @@ class KernelSession:
         self.python_executable = sys.executable
         self.created_at = __import__('datetime').datetime.now()
         self._logger = logging.getLogger(f"quench.kernel.{self.kernel_id[:8]}")
+        
+        # Track kernel busy/idle state for cell status indicators
+        self.is_busy = False
+        self.pending_executions: Dict[str, str] = {}  # msg_id -> status
 
     async def start(self, kernel_name: str = None):
         """
@@ -112,6 +116,45 @@ class KernelSession:
         self.km = None
         self.listener_task = None
 
+    async def _send_cell_status(self, msg_id: str, status: str):
+        """
+        Send a cell status update message to the frontend.
+        
+        Args:
+            msg_id: The original execute request message ID
+            status: One of 'queued', 'running', 'completed_ok', 'completed_error'
+        """
+        from datetime import datetime, timezone
+        status_message = {
+            'header': {
+                'msg_id': f"status_{msg_id}_{status}_{datetime.now(timezone.utc).isoformat()}",
+                'msg_type': 'quench_cell_status',
+                'username': 'quench',
+                'session': self.kernel_id,
+                'date': datetime.now(timezone.utc),
+                'version': '5.3'
+            },
+            'msg_type': 'quench_cell_status',
+            'parent_header': {
+                'msg_id': msg_id,
+                'msg_type': 'execute_request',
+                'username': 'quench',
+                'session': self.kernel_id,
+                'date': datetime.now(timezone.utc),
+                'version': '5.3'
+            },
+            'content': {
+                'status': status
+            },
+            'metadata': {},
+            'buffers': []
+        }
+        
+        # Add to cache and relay
+        self.output_cache.append(status_message)
+        await self.relay_queue.put((self.kernel_id, status_message))
+        self._logger.debug(f"Sent cell status '{status}' for msg_id {msg_id[:8]}")
+
     async def execute(self, code: str):
         """
         Send code to the kernel's shell channel for execution.
@@ -123,7 +166,7 @@ class KernelSession:
             raise RuntimeError("Kernel client is not available. Call start() first.")
 
         try:
-            # Send the code for execution
+            # First, get the msg_id that will be generated
             msg_id = self.client.execute(code)
             self._logger.debug(f"Executed code in kernel {self.kernel_id[:8]}, msg_id: {msg_id}")
             
@@ -163,6 +206,20 @@ class KernelSession:
             self.output_cache.append(execute_input_msg)
             await self.relay_queue.put((self.kernel_id, execute_input_msg))
             self._logger.debug(f"Created synthetic execute_input message for kernel {self.kernel_id[:8]}")
+            
+            # Now send status messages after the cell has been created
+            # Track this execution and send queued status
+            self.pending_executions[msg_id] = 'queued'
+            await self._send_cell_status(msg_id, 'queued')
+            
+            # Wait for kernel to be available if it's busy
+            while self.is_busy:
+                await asyncio.sleep(0.1)
+            
+            # Send running status when execution begins
+            if msg_id in self.pending_executions:
+                self.pending_executions[msg_id] = 'running'
+                await self._send_cell_status(msg_id, 'running')
             
             return msg_id
         except Exception as e:
@@ -247,6 +304,31 @@ class KernelSession:
                     if message.get('msg_type') == 'execute_input':
                         self._logger.debug(f"Skipping real execute_input message from kernel {self.kernel_id[:8]}")
                         continue
+                    
+                    # Handle kernel status messages to track busy/idle state
+                    if message.get('msg_type') == 'status':
+                        execution_state = message.get('content', {}).get('execution_state')
+                        if execution_state == 'busy':
+                            self.is_busy = True
+                            self._logger.debug(f"Kernel {self.kernel_id[:8]} is now busy")
+                        elif execution_state == 'idle':
+                            self.is_busy = False
+                            self._logger.debug(f"Kernel {self.kernel_id[:8]} is now idle")
+                            
+                            # Check if this corresponds to a completed execution
+                            parent_msg_id = message.get('parent_header', {}).get('msg_id')
+                            if parent_msg_id and parent_msg_id in self.pending_executions:
+                                # Assume successful completion unless we've seen an error
+                                # We'll handle errors in the error message handler
+                                await self._send_cell_status(parent_msg_id, 'completed_ok')
+                                del self.pending_executions[parent_msg_id]
+                    
+                    # Handle error messages to mark cells as completed with error
+                    elif message.get('msg_type') == 'error':
+                        parent_msg_id = message.get('parent_header', {}).get('msg_id')
+                        if parent_msg_id and parent_msg_id in self.pending_executions:
+                            await self._send_cell_status(parent_msg_id, 'completed_error')
+                            del self.pending_executions[parent_msg_id]
                     
                     # Append to output cache
                     self.output_cache.append(message)

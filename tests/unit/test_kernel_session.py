@@ -117,12 +117,28 @@ class TestKernelSession:
         # Verify execute was called with correct parameters
         mock_client.execute.assert_called_once_with(code)
         
-        # Verify synthetic execute_input message was queued
+        # Verify synthetic execute_input message was sent first
         assert not self.relay_queue.empty()
         kernel_id, message = await self.relay_queue.get()
         assert kernel_id == session.kernel_id
         assert message["msg_type"] == "execute_input"
         assert message["content"]["code"] == code
+        
+        # Verify queued status message was sent next
+        assert not self.relay_queue.empty()
+        kernel_id, status_message = await self.relay_queue.get()
+        assert kernel_id == session.kernel_id
+        assert status_message["msg_type"] == "quench_cell_status"
+        assert status_message["content"]["status"] == "queued"
+        assert status_message["parent_header"]["msg_id"] == "msg-id-123"
+        
+        # Verify running status message was sent last
+        assert not self.relay_queue.empty()
+        kernel_id, status_message = await self.relay_queue.get()
+        assert kernel_id == session.kernel_id
+        assert status_message["msg_type"] == "quench_cell_status"
+        assert status_message["content"]["status"] == "running"
+        assert status_message["parent_header"]["msg_id"] == "msg-id-123"
     
     @pytest.mark.asyncio
     async def test_kernel_session_execute_without_client(self):

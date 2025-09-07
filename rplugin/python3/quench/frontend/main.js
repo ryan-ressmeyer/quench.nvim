@@ -237,6 +237,10 @@ class QuenchClient {
                 this.handleKernelRestarted(message);
                 break;
                 
+            case 'quench_cell_status':
+                this.handleCellStatus(message);
+                break;
+                
             default:
                 console.log(`Unhandled message type: ${msgType}`);
         }
@@ -279,6 +283,12 @@ class QuenchClient {
             this.cells.set(parentMsgId, cellElement);
             this.outputArea.appendChild(cellElement);
             this.activeCellElement = cellElement;
+            
+            // Set the sidebar to running state since we're getting output
+            const sidebar = cellElement.querySelector('.cell-sidebar');
+            if (sidebar) {
+                sidebar.className = 'cell-sidebar status-running';
+            }
         }
         
         const cell = this.cells.get(parentMsgId);
@@ -371,6 +381,12 @@ class QuenchClient {
             this.cells.set(parentMsgId, cellElement);
             this.outputArea.appendChild(cellElement);
             this.activeCellElement = cellElement;
+            
+            // Set the sidebar to running state since we're getting output
+            const sidebar = cellElement.querySelector('.cell-sidebar');
+            if (sidebar) {
+                sidebar.className = 'cell-sidebar status-running';
+            }
         }
         
         const cell = this.cells.get(parentMsgId);
@@ -400,6 +416,12 @@ class QuenchClient {
             this.cells.set(parentMsgId, cellElement);
             this.outputArea.appendChild(cellElement);
             this.activeCellElement = cellElement;
+            
+            // Set the sidebar to error state since this is an error message
+            const sidebar = cellElement.querySelector('.cell-sidebar');
+            if (sidebar) {
+                sidebar.className = 'cell-sidebar status-completed-error';
+            }
         }
         
         const cell = this.cells.get(parentMsgId);
@@ -432,6 +454,41 @@ class QuenchClient {
         if (executionState) {
             console.log(`Kernel execution state: ${executionState}`);
             // Could update UI to show kernel busy/idle state
+        }
+    }
+
+    handleCellStatus(message) {
+        const parentMsgId = message.parent_header?.msg_id;
+        if (!parentMsgId) {
+            console.warn('Cell status message without parent_header.msg_id:', message);
+            return;
+        }
+        
+        const status = message.content?.status;
+        if (!status) {
+            console.warn('Cell status message without status:', message);
+            return;
+        }
+        
+        console.log(`Cell status update: ${parentMsgId.slice(0,8)} -> ${status}`);
+        
+        // Find the cell element
+        const cell = this.cells.get(parentMsgId);
+        if (!cell) {
+            console.warn(`Cell not found for status update: ${parentMsgId.slice(0,8)}`);
+            return;
+        }
+        
+        // Update the sidebar status
+        const sidebar = cell.querySelector('.cell-sidebar');
+        if (sidebar) {
+            // Remove existing status classes
+            sidebar.className = sidebar.className.replace(/status-\w+/g, '');
+            // Add new status class
+            sidebar.className += ` status-${status.replace('_', '-')}`;
+            console.log(`Updated cell ${parentMsgId.slice(0,8)} sidebar to ${status}`);
+        } else {
+            console.warn(`Sidebar not found in cell ${parentMsgId.slice(0,8)}`);
         }
     }
 
@@ -474,6 +531,11 @@ class QuenchClient {
         const cellDiv = document.createElement('div');
         cellDiv.className = 'cell';
         cellDiv.setAttribute('data-msg-id', msgId);
+        
+        // Create status sidebar
+        const sidebarDiv = document.createElement('div');
+        sidebarDiv.className = 'cell-sidebar status-queued'; // Start in queued state
+        cellDiv.appendChild(sidebarDiv);
         
         // Create input section
         const inputDiv = document.createElement('div');

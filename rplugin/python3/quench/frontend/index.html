@@ -60,12 +60,28 @@
         }
 
         .cell {
+            position: relative;
             margin-bottom: 20px;
-            border-left: 3px solid #007acc;
+            padding-left: 15px; /* Make space for the sidebar */
             background-color: #252526;
             border-radius: 4px;
             overflow: hidden;
         }
+
+        .cell-sidebar {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 5px;
+            height: 100%;
+            background-color: #6c757d; /* Default to gray */
+            transition: background-color 0.3s ease-in-out;
+        }
+
+        .status-queued { background-color: #6c757d; } /* Gray */
+        .status-running { background-color: #28a745; } /* Green */
+        .status-completed-ok { background-color: #007acc; } /* Metallic Blue */
+        .status-completed-error { background-color: #dc3545; } /* Red */
 
         .cell-input {
             padding: 15px;
