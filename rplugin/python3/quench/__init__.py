@@ -3,6 +3,7 @@ import logging
 logging.basicConfig(filename="/tmp/quench.log", level=logging.DEBUG)
 import re
 from typing import Optional
+import concurrent.futures 
 
 import pynvim
 
@@ -109,36 +110,147 @@ class Quench:
     @pynvim.autocmd("VimLeave", sync=True)
     def on_vim_leave(self):
         """
-        Handle Vim exit - clean up all resources.
+        Handle Vim exit - fires off the async cleanup and allows Neovim to exit immediately.
+        This is a synchronous handler that schedules the async task without waiting for it.
         """
-        self._logger.info("Vim leaving - starting cleanup")
+        self._logger.info("Vim leaving - scheduling 'fire and forget' async cleanup.")
         try:
-            self._cleanup()
+            # Get the running event loop.
+            loop = asyncio.get_running_loop()
+
+            # Schedule the cleanup task on the loop. We don't store or wait on
+            # the future. This allows the synchronous handler to return
+            # immediately, making the UI feel responsive. The pynvim host
+            # process will stay alive in the background until the task completes.
+            asyncio.run_coroutine_threadsafe(self._async_cleanup(), loop)
+            
+            self._logger.info("Cleanup task scheduled. Neovim can now exit.")
+
         except Exception as e:
-            self._logger.error(f"Error during VimLeave cleanup: {e}")
-        finally:
-            self._logger.info("Cleanup completed")
+            self._logger.error(f"Error scheduling VimLeave cleanup: {e}")
+
+    #@pynvim.autocmd("VimLeave", sync=True)
+    #def on_vim_leave(self):
+    #    """
+    #    Handle Vim exit - clean up all resources.
+    #    This sync handler blocks Neovim's exit until async cleanup is done.
+    #    """
+    #    self._logger.info("Vim leaving - starting synchronous cleanup handler.")
+    #    try:
+    #        # Get the pynvim event loop, which should be running.
+    #        loop = asyncio.get_running_loop()
+
+    #        # Schedule the async cleanup on the running loop and get a future.
+    #        # This is the thread-safe way to interact with a running event loop.
+    #        future = asyncio.run_coroutine_threadsafe(self._async_cleanup(), loop)
+
+    #        # Block and wait for the future to complete with a timeout.
+    #        # future.result() will re-raise any exceptions from the coroutine.
+    #        future.result(timeout=5.0)
+    #        self._logger.info("Async cleanup completed successfully.")
+
+    #    except concurrent.futures.TimeoutError:
+    #        self._logger.warning("Cleanup did not complete within the 5-second timeout.")
+    #    except Exception as e:
+    #        self._logger.error(f"Error during VimLeave cleanup: {e}")
+    #    finally:
+    #        self._logger.info("Synchronous cleanup handler finished.")
+
+    #@pynvim.autocmd("VimLeave", sync=True)
+    #def on_vim_leave(self):
+    #    """
+    #    Handle Vim exit - clean up all resources.
+    #    This is a sync handler that blocks Neovim's exit until async cleanup is done.
+    #    """
+    #    self._logger.info("Vim leaving - starting synchronous cleanup handler.")
+    #    
+    #    # Create an event to signal completion from the async task.
+    #    cleanup_done = threading.Event()
+
+    #    async def cleanup_and_set_event():
+    #        """Wrapper to run async cleanup and set the event."""
+    #        try:
+    #            await self._async_cleanup()
+    #        except Exception as e:
+    #            self._logger.error(f"Error in async cleanup task: {e}")
+    #        finally:
+    #            # Signal that cleanup is finished.
+    #            cleanup_done.set()
+
+    #    try:
+    #        # Schedule the async cleanup on the pynvim event loop.
+    #        self.nvim.async_call(cleanup_and_set_event)
+    #        
+    #        # Block and wait for the async cleanup to complete.
+    #        # A timeout is added as a safeguard against deadlocks.
+    #        cleanup_done.wait(timeout=5.0)
+    #        
+    #        if not cleanup_done.is_set():
+    #            self._logger.warning("Cleanup did not complete within the timeout.")
+
+    #    except Exception as e:
+    #        self._logger.error(f"Error during VimLeave cleanup scheduling: {e}")
+    #    finally:
+    #        self._logger.info("Synchronous cleanup handler finished.")
 
     def _cleanup(self):
         """
-        Synchronous wrapper to run the async cleanup logic in a separate thread.
+        This method is now deprecated in favor of the new on_vim_leave logic.
+        You can remove it or leave it, but it will no longer be called by on_vim_leave.
         """
-        import threading
+        pass # This method is no longer used by the VimLeave autocmd.
+    #@pynvim.autocmd("VimLeave", sync=True)
+    #def on_vim_leave(self):
+    #    """
+    #    Handle Vim exit - clean up all resources.
+    #    """
+    #    self._logger.info("Vim leaving - starting cleanup")
+    #    try:
+    #        self._cleanup()
+    #    except Exception as e:
+    #        self._logger.error(f"Error during VimLeave cleanup: {e}")
+    #    finally:
+    #        self._logger.info("Cleanup completed")
 
-        def cleanup_thread():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(self._async_cleanup())
-            finally:
-                loop.close()
 
-        thread = threading.Thread(target=cleanup_thread)
-        thread.start()
-        thread.join(timeout=2.0)  # Add a reasonable timeout
+    #def _cleanup(self):
+    #    """
+    #    Synchronous wrapper to run the async cleanup logic in a separate thread.
+    #    """
+    #    import threading
 
-        if thread.is_alive():
-            self._logger.warning("Cleanup thread timed out.")
+    #    def cleanup_thread():
+    #        loop = asyncio.new_event_loop()
+    #        asyncio.set_event_loop(loop)
+    #        try:
+    #            loop.run_until_complete(self._async_cleanup())
+    #        finally:
+    #            loop.close()
+
+    #    thread = threading.Thread(target=cleanup_thread)
+    #    thread.start()
+    #    thread.join(timeout=2.0)  # Add a reasonable timeout
+
+    #    if thread.is_alive():
+    #        self._logger.warning("Cleanup thread timed out.")
+
+    #def _cleanup(self):
+    #    """
+    #    Synchronous wrapper to run the async cleanup logic.
+    #    """
+
+    #    self._logger.info("Starting synchronous cleanup")
+    #    try:
+    #        # Get the event loop provided by pynvim.
+    #        loop = asyncio.get_event_loop()
+    #        
+    #        # Since on_vim_leave is a sync=True handler, the event loop is not
+    #        # running, so we can safely call run_until_complete. This will
+    #        # block until the async cleanup is finished.
+    #        loop.run_until_complete(self._async_cleanup())
+    #    except Exception as e:
+    #        self._logger.error(f"Error during synchronous cleanup: {e}")
+
 
     async def _async_cleanup(self):
         """
