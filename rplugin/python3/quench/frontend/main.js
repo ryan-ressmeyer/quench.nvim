@@ -547,9 +547,53 @@ class QuenchClient {
         
         const codeElement = document.createElement('code');
         codeElement.textContent = code;
-        
+
         inputDiv.appendChild(inputHeader);
         inputDiv.appendChild(codeElement);
+
+        // New logic for collapsible cells
+        const lines = code.split('\n');
+        if (lines.length > 4) {
+            codeElement.classList.add('collapsed');
+
+            // Create bottom bar
+            const bottomBar = document.createElement('div');
+            bottomBar.className = 'cell-input-bottom-bar';
+
+            // Create left section with collapse button
+            const leftSection = document.createElement('div');
+            leftSection.className = 'bottom-bar-left';
+            
+            const collapseButton = document.createElement('button');
+            collapseButton.className = 'collapse-button';
+            collapseButton.innerHTML = '▼'; // Down arrow for collapsed state
+            leftSection.appendChild(collapseButton);
+
+            // Create center section with status text
+            const centerSection = document.createElement('div');
+            centerSection.className = 'bottom-bar-center';
+            centerSection.textContent = '-collapsed-';
+
+            // Create right section with line count
+            const rightSection = document.createElement('div');
+            rightSection.className = 'bottom-bar-right';
+            
+            const lineCount = document.createElement('span');
+            lineCount.className = 'line-count';
+            lineCount.textContent = `${lines.length} lines`;
+            rightSection.appendChild(lineCount);
+            
+            collapseButton.onclick = () => {
+                const isCollapsed = codeElement.classList.toggle('collapsed');
+                collapseButton.innerHTML = isCollapsed ? '▼' : '▲'; // Toggle arrow direction
+                centerSection.textContent = isCollapsed ? '-collapsed-' : '-expanded-';
+            };
+
+            bottomBar.appendChild(leftSection);
+            bottomBar.appendChild(centerSection);
+            bottomBar.appendChild(rightSection);
+            inputDiv.appendChild(bottomBar);
+        }
         
         // Create output section
         const outputDiv = document.createElement('div');
