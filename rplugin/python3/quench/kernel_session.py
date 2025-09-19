@@ -83,40 +83,6 @@ class KernelSession:
             await self.shutdown()
             raise
 
-    #async def shutdown(self):
-    #    """
-    #    Safely shut down the kernel and clean up resources.
-    #    """
-    #    self._logger.info(f"Shutting down kernel {self.kernel_id[:8]}")
-
-    #    # Cancel the listener task
-    #    if self.listener_task and not self.listener_task.done():
-    #        self.listener_task.cancel()
-    #        try:
-    #            await self.listener_task
-    #        except asyncio.CancelledError:
-    #            pass
-
-    #    # Stop client channels
-    #    if self.client:
-    #        try:
-    #            self.client.stop_channels()
-    #        except Exception as e:
-    #            self._logger.warning(f"Error stopping client channels: {e}")
-
-    #    # Shutdown the kernel
-    #    if self.km:
-    #        try:
-    #            await self.km.shutdown_kernel(now=True)  # This is also async in jupyter_client 8.x
-    #        except Exception as e:
-    #            self._logger.warning(f"Error shutting down kernel: {e}")
-
-    #    # Clean up references
-    #    self.client = None
-    #    self.km = None
-    #    self.listener_task = None
-    # rplugin/python3/quench/kernel_session.py
-
     async def shutdown(self):
         """
         Safely shut down the kernel and clean up resources with timeouts.

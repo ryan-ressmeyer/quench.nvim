@@ -129,128 +129,12 @@ class Quench:
         except Exception as e:
             self._logger.error(f"Error scheduling VimLeave cleanup: {e}")
 
-    #@pynvim.autocmd("VimLeave", sync=True)
-    #def on_vim_leave(self):
-    #    """
-    #    Handle Vim exit - clean up all resources.
-    #    This sync handler blocks Neovim's exit until async cleanup is done.
-    #    """
-    #    self._logger.info("Vim leaving - starting synchronous cleanup handler.")
-    #    try:
-    #        # Get the pynvim event loop, which should be running.
-    #        loop = asyncio.get_running_loop()
-
-    #        # Schedule the async cleanup on the running loop and get a future.
-    #        # This is the thread-safe way to interact with a running event loop.
-    #        future = asyncio.run_coroutine_threadsafe(self._async_cleanup(), loop)
-
-    #        # Block and wait for the future to complete with a timeout.
-    #        # future.result() will re-raise any exceptions from the coroutine.
-    #        future.result(timeout=5.0)
-    #        self._logger.info("Async cleanup completed successfully.")
-
-    #    except concurrent.futures.TimeoutError:
-    #        self._logger.warning("Cleanup did not complete within the 5-second timeout.")
-    #    except Exception as e:
-    #        self._logger.error(f"Error during VimLeave cleanup: {e}")
-    #    finally:
-    #        self._logger.info("Synchronous cleanup handler finished.")
-
-    #@pynvim.autocmd("VimLeave", sync=True)
-    #def on_vim_leave(self):
-    #    """
-    #    Handle Vim exit - clean up all resources.
-    #    This is a sync handler that blocks Neovim's exit until async cleanup is done.
-    #    """
-    #    self._logger.info("Vim leaving - starting synchronous cleanup handler.")
-    #    
-    #    # Create an event to signal completion from the async task.
-    #    cleanup_done = threading.Event()
-
-    #    async def cleanup_and_set_event():
-    #        """Wrapper to run async cleanup and set the event."""
-    #        try:
-    #            await self._async_cleanup()
-    #        except Exception as e:
-    #            self._logger.error(f"Error in async cleanup task: {e}")
-    #        finally:
-    #            # Signal that cleanup is finished.
-    #            cleanup_done.set()
-
-    #    try:
-    #        # Schedule the async cleanup on the pynvim event loop.
-    #        self.nvim.async_call(cleanup_and_set_event)
-    #        
-    #        # Block and wait for the async cleanup to complete.
-    #        # A timeout is added as a safeguard against deadlocks.
-    #        cleanup_done.wait(timeout=5.0)
-    #        
-    #        if not cleanup_done.is_set():
-    #            self._logger.warning("Cleanup did not complete within the timeout.")
-
-    #    except Exception as e:
-    #        self._logger.error(f"Error during VimLeave cleanup scheduling: {e}")
-    #    finally:
-    #        self._logger.info("Synchronous cleanup handler finished.")
-
     def _cleanup(self):
         """
         This method is now deprecated in favor of the new on_vim_leave logic.
         You can remove it or leave it, but it will no longer be called by on_vim_leave.
         """
         pass # This method is no longer used by the VimLeave autocmd.
-    #@pynvim.autocmd("VimLeave", sync=True)
-    #def on_vim_leave(self):
-    #    """
-    #    Handle Vim exit - clean up all resources.
-    #    """
-    #    self._logger.info("Vim leaving - starting cleanup")
-    #    try:
-    #        self._cleanup()
-    #    except Exception as e:
-    #        self._logger.error(f"Error during VimLeave cleanup: {e}")
-    #    finally:
-    #        self._logger.info("Cleanup completed")
-
-
-    #def _cleanup(self):
-    #    """
-    #    Synchronous wrapper to run the async cleanup logic in a separate thread.
-    #    """
-    #    import threading
-
-    #    def cleanup_thread():
-    #        loop = asyncio.new_event_loop()
-    #        asyncio.set_event_loop(loop)
-    #        try:
-    #            loop.run_until_complete(self._async_cleanup())
-    #        finally:
-    #            loop.close()
-
-    #    thread = threading.Thread(target=cleanup_thread)
-    #    thread.start()
-    #    thread.join(timeout=2.0)  # Add a reasonable timeout
-
-    #    if thread.is_alive():
-    #        self._logger.warning("Cleanup thread timed out.")
-
-    #def _cleanup(self):
-    #    """
-    #    Synchronous wrapper to run the async cleanup logic.
-    #    """
-
-    #    self._logger.info("Starting synchronous cleanup")
-    #    try:
-    #        # Get the event loop provided by pynvim.
-    #        loop = asyncio.get_event_loop()
-    #        
-    #        # Since on_vim_leave is a sync=True handler, the event loop is not
-    #        # running, so we can safely call run_until_complete. This will
-    #        # block until the async cleanup is finished.
-    #        loop.run_until_complete(self._async_cleanup())
-    #    except Exception as e:
-    #        self._logger.error(f"Error during synchronous cleanup: {e}")
-
 
     async def _async_cleanup(self):
         """
@@ -803,37 +687,6 @@ class Quench:
             self._logger.error(f"Error in QuenchStop: {e}")
             self.nvim.err_write(f"Stop error: {e}\n")
 
-    #@pynvim.command('QuenchStop', sync=True)
-    #def stop_command(self):
-    #    """
-    #    Stop all Quench components.
-    #    """
-    #    self.nvim.out_write("Stopping Quench components...\n")
-    #    import threading
-
-    #    def cleanup_in_thread():
-    #        """Run the async cleanup in a new thread with its own event loop."""
-    #        loop = asyncio.new_event_loop()
-    #        asyncio.set_event_loop(loop)
-    #        try:
-    #            loop.run_until_complete(self._cleanup())
-    #        except Exception as e:
-    #            # Use async_call to safely report errors back to Neovim from the thread.
-    #            self._logger.error(f"Error in cleanup thread: {e}")
-    #            self.nvim.async_call(self.nvim.err_write, f"Stop error: {e}\n")
-    #        finally:
-    #            loop.close()
-    #    
-    #    try:
-    #        thread = threading.Thread(target=cleanup_in_thread)
-    #        thread.start()
-    #        thread.join() # Wait for the cleanup thread to finish.
-    #        self.web_server_started = False
-    #        self.nvim.out_write("Quench stopped.\n")
-    #    except Exception as e:
-    #        self._logger.error(f"Error in QuenchStop: {e}")
-    #        self.nvim.err_write(f"Stop error: {e}\n")
-
     @pynvim.command("QuenchRunCellAdvance", sync=True)
     def run_cell_advance(self):
         """
@@ -870,6 +723,14 @@ class Quench:
                 self._notify_user(f"Error extracting cell: {e}", level='error')
                 return
             
+            # Immediately advance the cursor
+            try:
+                advance_to_line = cell_end_line + 1 if cell_end_line < len(lines) else len(lines)
+                self.nvim.current.window.cursor = (advance_to_line, 0)
+            except Exception as e:
+                self._logger.error(f"Error advancing cursor: {e}")
+                # Don't block execution if cursor advancement fails, just log it.
+
             # Select kernel synchronously
             try:
                 kernel_name = self._get_or_select_kernel_sync(current_bnum)
@@ -893,41 +754,23 @@ class Quench:
                         # Create task in existing loop
                         task = asyncio.create_task(self._run_cell_async(current_bnum, cell_code, kernel_name))
                         
-                        # Add callback to advance cursor after execution
-                        def handle_task_and_advance(task):
+                        # The callback now only handles errors, no longer advances cursor.
+                        def handle_task_exception(task):
                             if task.exception():
                                 self._logger.error(f"Background task failed: {task.exception()}")
                                 try:
                                     self.nvim.async_call(lambda: self._notify_user(f"Execution failed: {task.exception()}", level='error'))
                                 except:
                                     pass
-                            else:
-                                # Advance cursor to line following cell end
-                                def advance_cursor():
-                                    try:
-                                        advance_to_line = cell_end_line + 1 if cell_end_line < len(lines) else len(lines)
-                                        self.nvim.current.window.cursor = (advance_to_line, 0)
-                                    except Exception as e:
-                                        self._logger.error(f"Error advancing cursor: {e}")
-                                
-                                try:
-                                    self.nvim.async_call(advance_cursor)
-                                except:
-                                    pass
                         
-                        task.add_done_callback(handle_task_and_advance)
+                        task.add_done_callback(handle_task_exception)
                     else:
                         # Run in existing loop
                         loop.run_until_complete(self._run_cell_async(current_bnum, cell_code, kernel_name))
-                        # Advance cursor after execution
-                        advance_to_line = cell_end_line + 1 if cell_end_line < len(lines) else len(lines)
-                        self.nvim.current.window.cursor = (advance_to_line, 0)
+
                 except RuntimeError:
                     # No event loop, create one
                     asyncio.run(self._run_cell_async(current_bnum, cell_code, kernel_name))
-                    # Advance cursor after execution
-                    advance_to_line = cell_end_line + 1 if cell_end_line < len(lines) else len(lines)
-                    self.nvim.current.window.cursor = (advance_to_line, 0)
                     
             except Exception as e:
                 self._logger.error(f"Error in async execution: {e}")
