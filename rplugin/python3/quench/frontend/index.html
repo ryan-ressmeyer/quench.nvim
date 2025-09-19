@@ -27,36 +27,101 @@
             z-index: 10;
             background-color: #1e1e1e;
             border-bottom: 2px solid #333;
-            padding-bottom: 10px;
+            padding: 10px 20px;
             margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
 
-        .header h1 {
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.35em;
+            line-height: 1;
             margin: 0;
-            color: #569cd6;
+            background: linear-gradient(90deg, #ff8b55 0%, #ff5577 25%, #4da6ff 75%, #7bb3ff 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            white-space: pre;
         }
 
-        .header .kernel-info {
+        .kernel-select-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .kernel-select-container label {
             font-size: 0.9em;
             color: #9cdcfe;
-            margin-top: 5px;
+            margin: 0;
         }
 
-        .status {
-            padding: 10px;
-            margin-bottom: 20px;
+        #kernel-select {
+            background-color: #252526;
+            color: #d4d4d4;
+            border: 1px solid #404040;
             border-radius: 4px;
-            font-size: 0.9em;
+            padding: 6px 12px;
+            font-size: 0.85em;
+            font-family: inherit;
         }
 
-        .status.connected {
+        #kernel-select:focus {
+            outline: none;
+            border-color: #007acc;
+            box-shadow: 0 0 0 1px #007acc;
+        }
+
+        #refresh-kernels {
+            background-color: #3c3c3c;
+            color: #d4d4d4;
+            border: 1px solid #555;
+            border-radius: 4px;
+            padding: 6px 12px;
+            font-size: 0.85em;
+            cursor: pointer;
+            transition: background-color 0.2s, border-color 0.2s;
+        }
+
+        #refresh-kernels:hover {
+            background-color: #484848;
+            border-color: #666;
+        }
+
+        #kernel-info-toggle.connected {
             background-color: #0d7377;
+            border-color: #0d7377;
             color: #ffffff;
         }
 
-        .status.disconnected {
+        #kernel-info-toggle.connected:hover {
+            background-color: #0a5d61;
+            border-color: #0a5d61;
+        }
+
+        #kernel-info-toggle.disconnected {
             background-color: #722f37;
+            border-color: #722f37;
             color: #ffffff;
+        }
+
+        #kernel-info-toggle.disconnected:hover {
+            background-color: #5d252b;
+            border-color: #5d252b;
         }
 
         .cell {
@@ -276,22 +341,24 @@
         .kernel-details-container {
             position: relative;
             display: inline-block;
-            margin-left: 15px;
         }
 
         #kernel-info-toggle {
-            background-color: #007acc;
-            color: #ffffff;
-            border: none;
-            padding: 6px 12px;
+            background-color: #3c3c3c;
+            color: #d4d4d4;
+            border: 1px solid #555;
             border-radius: 4px;
-            font-size: 0.8em;
+            padding: 6px 10px;
+            font-size: 0.9em;
             cursor: pointer;
-            transition: background-color 0.2s;
+            transition: background-color 0.2s, border-color 0.2s;
+            min-width: 32px;
+            text-align: center;
         }
 
         #kernel-info-toggle:hover {
-            background-color: #005a9e;
+            background-color: #484848;
+            border-color: #666;
         }
 
         #kernel-info-dropdown {
@@ -339,56 +406,74 @@
         }
 
         #autoscroll-toggle {
-            background-color: #007acc;
-            color: #ffffff;
-            border: none;
-            padding: 6px 12px;
+            background-color: #3c3c3c;
+            color: #d4d4d4;
+            border: 1px solid #555;
             border-radius: 4px;
-            font-size: 0.8em;
+            padding: 6px 12px;
+            font-size: 0.85em;
             cursor: pointer;
-            transition: background-color 0.2s;
-            margin-left: 10px;
+            transition: background-color 0.2s, border-color 0.2s;
         }
 
         #autoscroll-toggle:hover {
-            background-color: #005a9e;
+            background-color: #484848;
+            border-color: #666;
         }
 
         #autoscroll-toggle.autoscroll-on {
-            background-color: #4CAF50;
+            background-color: #0d7377;
+            border-color: #0d7377;
+            color: #ffffff;
         }
 
         #autoscroll-toggle.autoscroll-on:hover {
-            background-color: #45a049;
+            background-color: #0a5d61;
+            border-color: #0a5d61;
         }
 
         #autoscroll-toggle.autoscroll-off {
-            background-color: #f44336;
+            background-color: #722f37;
+            border-color: #722f37;
+            color: #ffffff;
         }
 
         #autoscroll-toggle.autoscroll-off:hover {
-            background-color: #da190b;
+            background-color: #5d252b;
+            border-color: #5d252b;
         }
     </style>
 </head>
 <body>
     <div id="output-area">
         <div class="header">
-            <h1>Quench</h1>
-            <div class="kernel-info">
-                <label for="kernel-select">Select Kernel: </label>
-                <select id="kernel-select">
-                    <option value="">Loading kernels...</option>
-                </select>
+            <div class="header-left">
+                <pre class="logo"> ________  ___  ___  _______   ________   ________  ___  ___
+|\   __  \|\  \|\  \|\  ___ \ |\   ___  \|\   ____\|\  \|\  \
+\ \  \|\  \ \  \\\  \ \   __/|\ \  \\ \  \ \  \___|\ \  \\\  \
+ \ \  \\\  \ \  \\\  \ \  \_|/_\ \  \\ \  \ \  \    \ \   __  \
+  \ \  \\\  \ \  \\\  \ \  \_|\ \ \  \\ \  \ \  \____\ \  \ \  \
+   \ \_____  \ \_______\ \_______\ \__\\ \__\ \_______\ \__\ \__\
+    \|___| \__\|_______|\|_______|\|__| \|__|\|_______|\|__|\|__|
+          \|__|                                                  </pre>
+            </div>
+            <div class="header-right">
+                <div class="kernel-select-container">
+                    <label for="kernel-select">Kernel:</label>
+                    <select id="kernel-select">
+                        <option value="">Loading kernels...</option>
+                    </select>
+                </div>
                 <button id="refresh-kernels">Refresh</button>
                 <button id="autoscroll-toggle" class="autoscroll-on" title="Toggle autoscrolling">Autoscroll On</button>
-            </div>
-            <div class="kernel-info">
-                Active Kernel: <span id="kernel-id">None</span>
                 <div class="kernel-details-container">
-                    <button id="kernel-info-toggle" title="View kernel details">Kernel Info ▾</button>
+                    <button id="kernel-info-toggle" title="View kernel status and details" class="disconnected">◉</button>
                     <div id="kernel-info-dropdown" class="hidden">
                         <div class="dropdown-content">
+                            <div class="info-item">
+                                <span class="info-label">Connection Status:</span>
+                                <span id="info-connection-status">-</span>
+                            </div>
                             <div class="info-item">
                                 <span class="info-label">Kernel UUID:</span>
                                 <span id="info-kernel-uuid">-</span>
@@ -413,10 +498,6 @@
                     </div>
                 </div>
             </div>
-        </div>
-        
-        <div id="connection-status" class="status disconnected">
-            Select a kernel to connect...
         </div>
     </div>
 

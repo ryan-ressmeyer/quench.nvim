@@ -4,8 +4,6 @@ class QuenchClient {
         this.kernelId = null;
         this.cells = new Map(); // Map from msg_id to cell element
         this.outputArea = null;
-        this.statusElement = null;
-        this.kernelIdElement = null;
         this.kernelSelect = null;
         this.refreshButton = null;
         this.kernelInfoToggle = null;
@@ -23,8 +21,6 @@ class QuenchClient {
     init() {
         // Get DOM elements
         this.outputArea = document.getElementById('output-area');
-        this.statusElement = document.getElementById('connection-status');
-        this.kernelIdElement = document.getElementById('kernel-id');
         this.kernelSelect = document.getElementById('kernel-select');
         this.refreshButton = document.getElementById('refresh-kernels');
         this.kernelInfoToggle = document.getElementById('kernel-info-toggle');
@@ -41,11 +37,10 @@ class QuenchClient {
         
         // Close dropdown when clicking outside
         document.addEventListener('click', (event) => {
-            if (!this.kernelInfoToggle.contains(event.target) && 
-                !this.kernelInfoDropdown.contains(event.target) && 
+            if (!this.kernelInfoToggle.contains(event.target) &&
+                !this.kernelInfoDropdown.contains(event.target) &&
                 !this.kernelInfoDropdown.classList.contains('hidden')) {
                 this.kernelInfoDropdown.classList.add('hidden');
-                this.kernelInfoToggle.textContent = 'Kernel Info ▾';
             }
         });
         
@@ -117,14 +112,13 @@ class QuenchClient {
         
         if (!selectedKernelId) {
             this.disconnect();
-            this.kernelIdElement.textContent = 'None';
             this.updateStatus('Select a kernel to connect...', 'disconnected');
+            this.updateKernelInfoDropdown(null);
             return;
         }
-        
+
         if (selectedKernelId !== this.kernelId) {
             this.kernelId = selectedKernelId;
-            this.kernelIdElement.textContent = selectedKernelId;
             this.updateKernelInfoDropdown(selectedKernelId);
             this.clearOutput();
             this.connect();
@@ -718,8 +712,14 @@ class QuenchClient {
 
 
     updateStatus(message, status) {
-        this.statusElement.textContent = message;
-        this.statusElement.className = `status ${status}`;
+        // Update the kernel info button to reflect connection status
+        this.kernelInfoToggle.className = status;
+
+        // Update the connection status in the dropdown
+        const connectionStatusElement = document.getElementById('info-connection-status');
+        if (connectionStatusElement) {
+            connectionStatusElement.textContent = message;
+        }
     }
 
     updateAutoscrollButton() {
@@ -752,10 +752,8 @@ class QuenchClient {
 
     toggleKernelInfoDropdown() {
         this.kernelInfoDropdown.classList.toggle('hidden');
-        
-        // Update the button text to show dropdown state
-        const isHidden = this.kernelInfoDropdown.classList.contains('hidden');
-        this.kernelInfoToggle.textContent = isHidden ? 'Kernel Info ▾' : 'Kernel Info ▴';
+
+        // The button is now just an icon, so we don't need to change text
     }
 
     updateKernelInfoDropdown(kernelId) {
