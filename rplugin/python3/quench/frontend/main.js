@@ -715,6 +715,13 @@ class QuenchClient {
         // Update the kernel info button to reflect connection status
         this.kernelInfoToggle.className = status;
 
+        // Update the icon based on connection status
+        if (status === 'connected') {
+            this.kernelInfoToggle.textContent = '⬢'; // Filled hexagon for connected
+        } else {
+            this.kernelInfoToggle.textContent = '⬡'; // Empty hexagon for disconnected
+        }
+
         // Update the connection status in the dropdown
         const connectionStatusElement = document.getElementById('info-connection-status');
         if (connectionStatusElement) {

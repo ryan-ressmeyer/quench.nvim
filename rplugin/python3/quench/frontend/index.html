@@ -16,7 +16,7 @@
             font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
             margin: 0;
             padding: 20px;
-            background-color: #1e1e1e;
+            background-color: #0d1117;
             color: #d4d4d4;
             line-height: 1.5;
         }
@@ -25,7 +25,7 @@
             position: sticky;
             top: 0;
             z-index: 10;
-            background-color: #1e1e1e;
+            background-color: #0d1117;
             border-bottom: 2px solid #333;
             padding: 10px 20px;
             margin-bottom: 20px;
@@ -51,7 +51,7 @@
             font-size: 0.35em;
             line-height: 1;
             margin: 0;
-            background: linear-gradient(90deg, #ff8b55 0%, #ff5577 25%, #4da6ff 75%, #7bb3ff 100%);
+            background: linear-gradient(90deg, #ffb088 0%, #ff7799 25%, #66c7ff 75%, #99d5ff 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
@@ -103,14 +103,14 @@
         }
 
         #kernel-info-toggle.connected {
-            background-color: #0d7377;
-            border-color: #0d7377;
+            background-color: #28a745;
+            border-color: #28a745;
             color: #ffffff;
         }
 
         #kernel-info-toggle.connected:hover {
-            background-color: #0a5d61;
-            border-color: #0a5d61;
+            background-color: #218838;
+            border-color: #218838;
         }
 
         #kernel-info-toggle.disconnected {
@@ -128,7 +128,7 @@
             position: relative;
             margin-bottom: 20px;
             padding-left: 15px; /* Make space for the sidebar */
-            background-color: #252526;
+            background-color: #161b22;
             border-radius: 4px;
             overflow: hidden;
         }
@@ -152,8 +152,8 @@
         .cell-input {
             position: relative;
             padding: 15px;
-            background-color: #1e1e1e;
-            border-bottom: 1px solid #333;
+            background-color: #161b22;
+            border-bottom: 1px solid #30363d;
         }
 
         .cell-input-header {
@@ -165,7 +165,7 @@
         .cell-input code {
             display: block;
             white-space: pre-wrap;
-            color: #d4d4d4;
+            color: #e6edf3;
             font-family: inherit;
             transition: max-height 0.3s ease-in-out;
         }
@@ -184,7 +184,7 @@
             left: 0;
             right: 0;
             height: 2em;
-            background: linear-gradient(to bottom, rgba(30, 30, 30, 0), rgba(30, 30, 30, 0.3) 25%, rgba(30, 30, 30, 0.7) 50%, rgba(30, 30, 30, 1));
+            background: linear-gradient(to bottom, rgba(22, 27, 34, 0), rgba(22, 27, 34, 0.3) 25%, rgba(22, 27, 34, 0.7) 50%, rgba(22, 27, 34, 1));
             pointer-events: none;
         }
 
@@ -195,10 +195,10 @@
             align-items: center;
             padding: 4px 0px;
             margin: 0 -15px -15px -15px;
-            background-color: #1e1e1e;
-            border-top: 1px solid #404040;
+            background-color: #161b22;
+            border-top: 1px solid #30363d;
             font-size: 0.75em;
-            color: #888;
+            color: #7d8590;
         }
         
         .bottom-bar-left, .bottom-bar-right {
@@ -209,32 +209,33 @@
             flex: 1;
             text-align: center;
             font-style: italic;
-            color: #777;
+            color: #7d8590;
         }
         
         .collapse-button {
-            background-color: #3c3c3c;
-            border: 1px solid #555;
-            color: #007acc;
+            background-color: #21262d;
+            border: 1px solid #30363d;
+            color: #58a6ff;
             padding: 1px 4px;
             border-radius: 3px;
             cursor: pointer;
             font-size: 0.9em;
             transition: background-color 0.2s, border-color 0.2s;
         }
-        
+
         .collapse-button:hover {
-            background-color: #484848;
-            border-color: #666;
+            background-color: #30363d;
+            border-color: #484f58;
         }
         
         .line-count {
-            color: #888;
+            color: #7d8590;
             font-style: italic;
         }
 
         .cell-output {
             padding: 15px;
+            background-color: #161b22;
         }
 
         .output-item {
@@ -422,14 +423,14 @@
         }
 
         #autoscroll-toggle.autoscroll-on {
-            background-color: #0d7377;
-            border-color: #0d7377;
+            background-color: #28a745;
+            border-color: #28a745;
             color: #ffffff;
         }
 
         #autoscroll-toggle.autoscroll-on:hover {
-            background-color: #0a5d61;
-            border-color: #0a5d61;
+            background-color: #218838;
+            border-color: #218838;
         }
 
         #autoscroll-toggle.autoscroll-off {
@@ -467,7 +468,7 @@
                 <button id="refresh-kernels">Refresh</button>
                 <button id="autoscroll-toggle" class="autoscroll-on" title="Toggle autoscrolling">Autoscroll On</button>
                 <div class="kernel-details-container">
-                    <button id="kernel-info-toggle" title="View kernel status and details" class="disconnected">◉</button>
+                    <button id="kernel-info-toggle" title="View kernel status and details" class="disconnected">⬡</button>
                     <div id="kernel-info-dropdown" class="hidden">
                         <div class="dropdown-content">
                             <div class="info-item">
