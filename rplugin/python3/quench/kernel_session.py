@@ -386,6 +386,86 @@ class KernelSessionManager:
             self._logger = logging.getLogger("quench.kernel_manager")
             KernelSessionManager._initialized = True
 
+    async def start_session(self, relay_queue: asyncio.Queue, buffer_name: str = None, kernel_name: str = None) -> KernelSession:
+        """
+        Starts a new kernel session without attaching it to a buffer.
+
+        Args:
+            relay_queue: The central message relay queue
+            buffer_name: Optional human-readable name for the session
+            kernel_name: Optional kernel name to use (defaults to 'python3')
+
+        Returns:
+            KernelSession: The newly created session
+        """
+        session = KernelSession(relay_queue, buffer_name, kernel_name)
+        try:
+            await session.start()
+            self.sessions[session.kernel_id] = session
+            self._logger.info(f"Started new unattached session {session.kernel_id[:8]} ({session.buffer_name})")
+            return session
+        except Exception as e:
+            self._logger.error(f"Failed to start session: {e}")
+            raise
+
+    async def shutdown_session(self, kernel_id: str):
+        """
+        Shuts down a specific kernel session and detaches all associated buffers.
+
+        Args:
+            kernel_id: ID of the kernel session to shutdown
+        """
+        if kernel_id in self.sessions:
+            session = self.sessions[kernel_id]
+            await session.shutdown()
+            del self.sessions[kernel_id]
+
+            # Detach any buffers attached to this session
+            buffers_to_detach = [bnum for bnum, kid in self.buffer_to_kernel_map.items() if kid == kernel_id]
+            for bnum in buffers_to_detach:
+                del self.buffer_to_kernel_map[bnum]
+
+            self._logger.info(f"Shut down session {kernel_id[:8]} and detached {len(buffers_to_detach)} buffers.")
+        else:
+            raise ValueError(f"Session {kernel_id} does not exist")
+
+    def get_kernel_choices(self, running_first: bool = True):
+        """
+        Returns a list of dictionaries for user selection, combining running kernels and new kernelspecs.
+
+        Args:
+            running_first: If True, running kernels are listed first; otherwise new kernels first
+
+        Returns:
+            List[Dict]: List of kernel choices with display_name, value, and is_running fields
+        """
+        choices = []
+        running_kernels = []
+        for kernel_id, session in self.sessions.items():
+            running_kernels.append({
+                'display_name': f"Running: {session.kernel_name} ({kernel_id[:8]})",
+                'value': kernel_id,
+                'is_running': True
+            })
+
+        new_kernels = []
+        kernelspecs = self.discover_kernelspecs()
+        for spec in kernelspecs:
+            new_kernels.append({
+                'display_name': f"New: {spec['display_name']}",
+                'value': spec['name'],
+                'is_running': False
+            })
+
+        if running_first:
+            choices.extend(running_kernels)
+            choices.extend(new_kernels)
+        else:
+            choices.extend(new_kernels)
+            choices.extend(running_kernels)
+
+        return choices
+
     async def get_or_create_session(self, bnum: int, relay_queue: asyncio.Queue, buffer_name: str = None, kernel_name: str = None) -> KernelSession:
         """
         Get an existing session for a buffer or create a new one.
@@ -406,23 +486,13 @@ class KernelSessionManager:
                 self._logger.debug(f"Returning existing session for buffer {bnum}")
                 return self.sessions[kernel_id]
 
-        # Create a new session with buffer name and kernel name
-        session = KernelSession(relay_queue, buffer_name, kernel_name)
-        
-        try:
-            await session.start()
-            
-            # Store the session and map the buffer
-            self.sessions[session.kernel_id] = session
-            self.buffer_to_kernel_map[bnum] = session.kernel_id
-            session.associated_buffers.add(bnum)
-            
-            self._logger.info(f"Created new session {session.kernel_id[:8]} ({session.buffer_name}) for buffer {bnum}")
-            return session
-            
-        except Exception as e:
-            self._logger.error(f"Failed to create session for buffer {bnum}: {e}")
-            raise
+        # Create a new session using start_session
+        session = await self.start_session(relay_queue, buffer_name, kernel_name)
+        self.buffer_to_kernel_map[bnum] = session.kernel_id
+        session.associated_buffers.add(bnum)
+
+        self._logger.info(f"Attached new session {session.kernel_id[:8]} to buffer {bnum}")
+        return session
 
     async def attach_buffer_to_session(self, bnum: int, kernel_id: str):
         """

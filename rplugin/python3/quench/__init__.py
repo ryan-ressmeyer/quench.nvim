@@ -227,18 +227,18 @@ class Quench:
             
             # Select kernel synchronously
             try:
-                kernel_name = self._get_or_select_kernel_sync(current_bnum)
-                if not kernel_name:
+                kernel_choice = self._get_or_select_kernel_sync(current_bnum)
+                if not kernel_choice:
                     self._notify_user("Kernel selection failed. Aborting execution.", level='error')
                     return
-                
-                self._logger.info(f"Using kernel: {kernel_name}")
-                
+
+                self._logger.info(f"Using kernel choice: {kernel_choice}")
+
             except Exception as e:
                 self._logger.error(f"Error selecting kernel: {e}")
                 self._notify_user(f"Error selecting kernel: {e}", level='error')
                 return
-            
+
             # Now run the async parts with the data we collected
             try:
                 # Try to get or create event loop
@@ -246,7 +246,7 @@ class Quench:
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
                         # Create task in existing loop
-                        task = asyncio.create_task(self._run_cell_async(current_bnum, cell_code, kernel_name))
+                        task = asyncio.create_task(self._run_cell_async(current_bnum, cell_code, kernel_choice))
                         
                         # Add error callback to the task
                         def handle_task_exception(task):
@@ -260,10 +260,10 @@ class Quench:
                         task.add_done_callback(handle_task_exception)
                     else:
                         # Run in existing loop
-                        loop.run_until_complete(self._run_cell_async(current_bnum, cell_code, kernel_name))
+                        loop.run_until_complete(self._run_cell_async(current_bnum, cell_code, kernel_choice))
                 except RuntimeError:
                     # No event loop, create one
-                    asyncio.run(self._run_cell_async(current_bnum, cell_code, kernel_name))
+                    asyncio.run(self._run_cell_async(current_bnum, cell_code, kernel_choice))
                     
             except Exception as e:
                 self._logger.error(f"Error in async execution: {e}")
@@ -280,45 +280,46 @@ class Quench:
     def _get_or_select_kernel_sync(self, bnum):
         """
         Synchronously get the kernel for the buffer or prompt the user to select one.
-        
+
         Args:
             bnum: Buffer number
+
+        Returns:
+            dict: A choice dictionary with 'value', 'is_running' keys, or None if failed
         """
         # Check for an existing session
         if bnum in self.kernel_manager.buffer_to_kernel_map:
             kernel_id = self.kernel_manager.buffer_to_kernel_map[bnum]
             if kernel_id in self.kernel_manager.sessions:
-                return self.kernel_manager.sessions[kernel_id].kernel_name
+                session = self.kernel_manager.sessions[kernel_id]
+                return {
+                    'value': kernel_id,
+                    'is_running': True,
+                    'kernel_choice': session.kernel_name
+                }
 
-        # Discover kernels and prompt for selection
+        # Get kernel choices (new kernels first for automatic kernel selection)
         try:
-            kernelspecs = self.kernel_manager.discover_kernelspecs()
-            if not kernelspecs:
+            choices = self.kernel_manager.get_kernel_choices(running_first=False)
+            if not choices:
                 self.nvim.err_write("No Jupyter kernels found. Please install ipykernel.\n")
                 return None
 
-            if len(kernelspecs) == 1:
-                return kernelspecs[0]['name']
+            if len(choices) == 1:
+                return choices[0]
 
-            # Create choices for the user
-            choices = [f"{i+1}. {spec['display_name']}" for i, spec in enumerate(kernelspecs)]
-            self.nvim.out_write("Please select a kernel:\n" + "\n".join(choices) + "\n")
-            
-            # Get user input
-            choice = self.nvim.call('input', 'Enter kernel number: ')
-            
-            try:
-                choice_idx = int(choice) - 1
-                if 0 <= choice_idx < len(kernelspecs):
-                    return kernelspecs[choice_idx]['name']
-            except (ValueError, IndexError):
-                self.nvim.err_write("Invalid selection. Using the default kernel.\n")
-                return kernelspecs[0]['name']
+            selected_choice = self._select_from_choices_sync(choices, "Please select a kernel")
+
+            if not selected_choice:
+                # Fallback to first available choice
+                selected_choice = choices[0]
+
+            return selected_choice
 
         except Exception as e:
             self._logger.error(f"Error during kernel selection: {e}")
             self.nvim.err_write(f"Error selecting kernel: {e}\n")
-        
+
         return None
 
     def _extract_cell_code_sync(self, lines, lnum, delimiter_pattern):
@@ -374,15 +375,15 @@ class Quench:
 
         return '\n'.join(cell_lines), cell_start + 1, cell_end
 
-    async def _run_cell_async(self, current_bnum, cell_code, kernel_name):
+    async def _run_cell_async(self, current_bnum, cell_code, kernel_choice):
         """
         Async implementation of cell execution.
         Takes pre-collected data to avoid Neovim API calls from wrong thread.
-        
+
         Args:
             current_bnum: Buffer number
             cell_code: Code to execute
-            kernel_name: Name of the kernel to use
+            kernel_choice: Choice dictionary with 'value', 'is_running' keys
         """
         self._logger.debug(f"Starting async execution for buffer {current_bnum}")
         
@@ -423,22 +424,31 @@ class Quench:
                         pass
         
         # Get or create kernel session for this buffer
-        # Try to get a meaningful buffer name
-        try:
-            buffer_name = self.nvim.current.buffer.name or f"buffer_{current_bnum}"
-            if buffer_name:
-                # Extract just the filename
-                import os
-                buffer_name = os.path.basename(buffer_name)
-        except:
-            buffer_name = f"buffer_{current_bnum}"
-        
-        session = await self.kernel_manager.get_or_create_session(
-            current_bnum, 
-            self.relay_queue,
-            buffer_name,
-            kernel_name
-        )
+        if kernel_choice['is_running']:
+            # Attach to existing running kernel
+            kernel_id = kernel_choice['value']
+            await self.kernel_manager.attach_buffer_to_session(current_bnum, kernel_id)
+            session = self.kernel_manager.sessions[kernel_id]
+        else:
+            # Create a new kernel session
+            kernel_choice_value = kernel_choice['value']
+
+            # Try to get a meaningful buffer name
+            try:
+                buffer_name = self.nvim.current.buffer.name or f"buffer_{current_bnum}"
+                if buffer_name:
+                    # Extract just the filename
+                    import os
+                    buffer_name = os.path.basename(buffer_name)
+            except:
+                buffer_name = f"buffer_{current_bnum}"
+
+            session = await self.kernel_manager.get_or_create_session(
+                current_bnum,
+                self.relay_queue,
+                buffer_name,
+                kernel_choice_value
+            )
         
         # Start message relay loop if not running
         if self.message_relay_task is None or self.message_relay_task.done():
@@ -733,12 +743,12 @@ class Quench:
 
             # Select kernel synchronously
             try:
-                kernel_name = self._get_or_select_kernel_sync(current_bnum)
-                if not kernel_name:
+                kernel_choice = self._get_or_select_kernel_sync(current_bnum)
+                if not kernel_choice:
                     self._notify_user("Kernel selection failed. Aborting execution.", level='error')
                     return
                 
-                self._logger.info(f"Using kernel: {kernel_name}")
+                self._logger.info(f"Using kernel: {kernel_choice}")
                 
             except Exception as e:
                 self._logger.error(f"Error selecting kernel: {e}")
@@ -752,7 +762,7 @@ class Quench:
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
                         # Create task in existing loop
-                        task = asyncio.create_task(self._run_cell_async(current_bnum, cell_code, kernel_name))
+                        task = asyncio.create_task(self._run_cell_async(current_bnum, cell_code, kernel_choice))
                         
                         # The callback now only handles errors, no longer advances cursor.
                         def handle_task_exception(task):
@@ -766,11 +776,11 @@ class Quench:
                         task.add_done_callback(handle_task_exception)
                     else:
                         # Run in existing loop
-                        loop.run_until_complete(self._run_cell_async(current_bnum, cell_code, kernel_name))
+                        loop.run_until_complete(self._run_cell_async(current_bnum, cell_code, kernel_choice))
 
                 except RuntimeError:
                     # No event loop, create one
-                    asyncio.run(self._run_cell_async(current_bnum, cell_code, kernel_name))
+                    asyncio.run(self._run_cell_async(current_bnum, cell_code, kernel_choice))
                     
             except Exception as e:
                 self._logger.error(f"Error in async execution: {e}")
@@ -815,12 +825,12 @@ class Quench:
             
             # Select kernel synchronously
             try:
-                kernel_name = self._get_or_select_kernel_sync(current_bnum)
-                if not kernel_name:
+                kernel_choice = self._get_or_select_kernel_sync(current_bnum)
+                if not kernel_choice:
                     self._notify_user("Kernel selection failed. Aborting execution.", level='error')
                     return
                 
-                self._logger.info(f"Using kernel: {kernel_name}")
+                self._logger.info(f"Using kernel: {kernel_choice}")
                 
             except Exception as e:
                 self._logger.error(f"Error selecting kernel: {e}")
@@ -834,7 +844,7 @@ class Quench:
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
                         # Create task in existing loop
-                        task = asyncio.create_task(self._run_cell_async(current_bnum, selected_code, kernel_name))
+                        task = asyncio.create_task(self._run_cell_async(current_bnum, selected_code, kernel_choice))
                         
                         # Add error callback to the task
                         def handle_task_exception(task):
@@ -848,10 +858,10 @@ class Quench:
                         task.add_done_callback(handle_task_exception)
                     else:
                         # Run in existing loop
-                        loop.run_until_complete(self._run_cell_async(current_bnum, selected_code, kernel_name))
+                        loop.run_until_complete(self._run_cell_async(current_bnum, selected_code, kernel_choice))
                 except RuntimeError:
                     # No event loop, create one
-                    asyncio.run(self._run_cell_async(current_bnum, selected_code, kernel_name))
+                    asyncio.run(self._run_cell_async(current_bnum, selected_code, kernel_choice))
                     
             except Exception as e:
                 self._logger.error(f"Error in async execution: {e}")
@@ -892,12 +902,12 @@ class Quench:
             
             # Select kernel synchronously
             try:
-                kernel_name = self._get_or_select_kernel_sync(current_bnum)
-                if not kernel_name:
+                kernel_choice = self._get_or_select_kernel_sync(current_bnum)
+                if not kernel_choice:
                     self._notify_user("Kernel selection failed. Aborting execution.", level='error')
                     return
                 
-                self._logger.info(f"Using kernel: {kernel_name}")
+                self._logger.info(f"Using kernel: {kernel_choice}")
                 
             except Exception as e:
                 self._logger.error(f"Error selecting kernel: {e}")
@@ -911,7 +921,7 @@ class Quench:
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
                         # Create task in existing loop
-                        task = asyncio.create_task(self._run_cell_async(current_bnum, current_line_code, kernel_name))
+                        task = asyncio.create_task(self._run_cell_async(current_bnum, current_line_code, kernel_choice))
                         
                         # Add error callback to the task
                         def handle_task_exception(task):
@@ -925,10 +935,10 @@ class Quench:
                         task.add_done_callback(handle_task_exception)
                     else:
                         # Run in existing loop
-                        loop.run_until_complete(self._run_cell_async(current_bnum, current_line_code, kernel_name))
+                        loop.run_until_complete(self._run_cell_async(current_bnum, current_line_code, kernel_choice))
                 except RuntimeError:
                     # No event loop, create one
-                    asyncio.run(self._run_cell_async(current_bnum, current_line_code, kernel_name))
+                    asyncio.run(self._run_cell_async(current_bnum, current_line_code, kernel_choice))
                     
             except Exception as e:
                 self._logger.error(f"Error in async execution: {e}")
@@ -979,12 +989,12 @@ class Quench:
             
             # Select kernel synchronously
             try:
-                kernel_name = self._get_or_select_kernel_sync(current_bnum)
-                if not kernel_name:
+                kernel_choice = self._get_or_select_kernel_sync(current_bnum)
+                if not kernel_choice:
                     self._notify_user("Kernel selection failed. Aborting execution.", level='error')
                     return
                 
-                self._logger.info(f"Using kernel: {kernel_name}")
+                self._logger.info(f"Using kernel: {kernel_choice}")
                 
             except Exception as e:
                 self._logger.error(f"Error selecting kernel: {e}")
@@ -998,7 +1008,7 @@ class Quench:
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
                         # Create task in existing loop
-                        task = asyncio.create_task(self._run_cell_async(current_bnum, combined_code, kernel_name))
+                        task = asyncio.create_task(self._run_cell_async(current_bnum, combined_code, kernel_choice))
                         
                         # Add error callback to the task
                         def handle_task_exception(task):
@@ -1012,10 +1022,10 @@ class Quench:
                         task.add_done_callback(handle_task_exception)
                     else:
                         # Run in existing loop
-                        loop.run_until_complete(self._run_cell_async(current_bnum, combined_code, kernel_name))
+                        loop.run_until_complete(self._run_cell_async(current_bnum, combined_code, kernel_choice))
                 except RuntimeError:
                     # No event loop, create one
-                    asyncio.run(self._run_cell_async(current_bnum, combined_code, kernel_name))
+                    asyncio.run(self._run_cell_async(current_bnum, combined_code, kernel_choice))
                     
             except Exception as e:
                 self._logger.error(f"Error in async execution: {e}")
@@ -1066,12 +1076,12 @@ class Quench:
             
             # Select kernel synchronously
             try:
-                kernel_name = self._get_or_select_kernel_sync(current_bnum)
-                if not kernel_name:
+                kernel_choice = self._get_or_select_kernel_sync(current_bnum)
+                if not kernel_choice:
                     self._notify_user("Kernel selection failed. Aborting execution.", level='error')
                     return
                 
-                self._logger.info(f"Using kernel: {kernel_name}")
+                self._logger.info(f"Using kernel: {kernel_choice}")
                 
             except Exception as e:
                 self._logger.error(f"Error selecting kernel: {e}")
@@ -1085,7 +1095,7 @@ class Quench:
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
                         # Create task in existing loop
-                        task = asyncio.create_task(self._run_cell_async(current_bnum, combined_code, kernel_name))
+                        task = asyncio.create_task(self._run_cell_async(current_bnum, combined_code, kernel_choice))
                         
                         # Add error callback to the task
                         def handle_task_exception(task):
@@ -1099,10 +1109,10 @@ class Quench:
                         task.add_done_callback(handle_task_exception)
                     else:
                         # Run in existing loop
-                        loop.run_until_complete(self._run_cell_async(current_bnum, combined_code, kernel_name))
+                        loop.run_until_complete(self._run_cell_async(current_bnum, combined_code, kernel_choice))
                 except RuntimeError:
                     # No event loop, create one
-                    asyncio.run(self._run_cell_async(current_bnum, combined_code, kernel_name))
+                    asyncio.run(self._run_cell_async(current_bnum, combined_code, kernel_choice))
                     
             except Exception as e:
                 self._logger.error(f"Error in async execution: {e}")
@@ -1152,12 +1162,12 @@ class Quench:
             
             # Select kernel synchronously
             try:
-                kernel_name = self._get_or_select_kernel_sync(current_bnum)
-                if not kernel_name:
+                kernel_choice = self._get_or_select_kernel_sync(current_bnum)
+                if not kernel_choice:
                     self._notify_user("Kernel selection failed. Aborting execution.", level='error')
                     return
                 
-                self._logger.info(f"Using kernel: {kernel_name}")
+                self._logger.info(f"Using kernel: {kernel_choice}")
                 
             except Exception as e:
                 self._logger.error(f"Error selecting kernel: {e}")
@@ -1171,7 +1181,7 @@ class Quench:
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
                         # Create task in existing loop
-                        task = asyncio.create_task(self._run_cell_async(current_bnum, combined_code, kernel_name))
+                        task = asyncio.create_task(self._run_cell_async(current_bnum, combined_code, kernel_choice))
                         
                         # Add error callback to the task
                         def handle_task_exception(task):
@@ -1185,10 +1195,10 @@ class Quench:
                         task.add_done_callback(handle_task_exception)
                     else:
                         # Run in existing loop
-                        loop.run_until_complete(self._run_cell_async(current_bnum, combined_code, kernel_name))
+                        loop.run_until_complete(self._run_cell_async(current_bnum, combined_code, kernel_choice))
                 except RuntimeError:
                     # No event loop, create one
-                    asyncio.run(self._run_cell_async(current_bnum, combined_code, kernel_name))
+                    asyncio.run(self._run_cell_async(current_bnum, combined_code, kernel_choice))
                     
             except Exception as e:
                 self._logger.error(f"Error in async execution: {e}")
@@ -1512,6 +1522,378 @@ class Quench:
         except Exception as e:
             self._logger.error(f"Error in QuenchResetKernel: {e}")
             self.nvim.err_write(f"Reset kernel error: {e}\n")
+
+    def _select_from_choices_sync(self, choices, prompt_title):
+        """
+        Helper method to present choices to user and get their selection.
+
+        Args:
+            choices: List of choice dictionaries with 'display_name' and 'value' keys
+            prompt_title: Title to display to the user
+
+        Returns:
+            The selected choice dictionary or None if cancelled/failed
+        """
+        if not choices:
+            self._notify_user("No choices available", level='error')
+            return None
+
+        if len(choices) == 1:
+            return choices[0]
+
+        # Create display choices with numbers
+        display_choices = [f"{i+1}. {choice['display_name']}" for i, choice in enumerate(choices)]
+        self.nvim.out_write(f"{prompt_title}:\n" + "\n".join(display_choices) + "\n")
+
+        # Get user input
+        choice_input = self.nvim.call('input', 'Enter selection number: ')
+
+        try:
+            choice_idx = int(choice_input) - 1
+            if 0 <= choice_idx < len(choices):
+                return choices[choice_idx]
+            else:
+                self._notify_user("Invalid selection", level='error')
+                return None
+        except (ValueError, IndexError):
+            self._notify_user("Invalid input. Selection cancelled.", level='error')
+            return None
+
+    @pynvim.command("QuenchStartKernel", sync=True)
+    def start_kernel_command(self):
+        """
+        Start a new kernel not attached to any buffers.
+        """
+        try:
+            self._logger.info("QuenchStartKernel called")
+
+            # Get available kernelspecs
+            try:
+                kernelspecs = self.kernel_manager.discover_kernelspecs()
+                if not kernelspecs:
+                    self._notify_user("No Jupyter kernels found. Please install ipykernel.", level='error')
+                    return
+
+                # Convert to choices format
+                choices = [{'display_name': spec['display_name'], 'value': spec['name']} for spec in kernelspecs]
+                selected_choice = self._select_from_choices_sync(choices, "Select a kernel to start")
+
+                if not selected_choice:
+                    return
+
+                kernel_choice = selected_choice['value']
+
+            except Exception as e:
+                self._logger.error(f"Error discovering kernels: {e}")
+                self._notify_user(f"Error discovering kernels: {e}", level='error')
+                return
+
+            # Start the kernel asynchronously
+            try:
+                # Try to get or create event loop
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Create task in existing loop
+                        task = asyncio.create_task(self._start_kernel_async(kernel_choice))
+
+                        # Add error callback to the task
+                        def handle_task_exception(task):
+                            if task.exception():
+                                self._logger.error(f"Start kernel task failed: {task.exception()}")
+                                try:
+                                    self.nvim.async_call(lambda: self._notify_user(f"Failed to start kernel: {task.exception()}", level='error'))
+                                except:
+                                    pass
+
+                        task.add_done_callback(handle_task_exception)
+                    else:
+                        # Run in existing loop
+                        loop.run_until_complete(self._start_kernel_async(kernel_choice))
+                except RuntimeError:
+                    # No event loop, create one
+                    asyncio.run(self._start_kernel_async(kernel_choice))
+            except Exception as e:
+                self._logger.error(f"Error starting kernel: {e}")
+                self._notify_user(f"Failed to start kernel: {e}", level='error')
+
+        except Exception as e:
+            self._logger.error(f"Error in QuenchStartKernel: {e}")
+            self._notify_user(f"Start kernel error: {e}", level='error')
+
+    @pynvim.command("QuenchShutdownKernel", sync=True)
+    def shutdown_kernel_command(self):
+        """
+        Shutdown a running kernel and detach any buffers that are linked to it.
+        """
+        try:
+            self._logger.info("QuenchShutdownKernel called")
+
+            # Get running kernels
+            try:
+                running_kernels = self.kernel_manager.list_sessions()
+                if not running_kernels:
+                    self._notify_user("No running kernels to shut down.")
+                    return
+
+                # Convert to choices format
+                choices = []
+                for kernel_id, session_info in running_kernels.items():
+                    choices.append({
+                        'display_name': f"{session_info['kernel_name']} ({session_info['short_id']}) - {len(session_info['associated_buffers'])} buffers",
+                        'value': kernel_id
+                    })
+
+                selected_choice = self._select_from_choices_sync(choices, "Select a kernel to shut down")
+
+                if not selected_choice:
+                    return
+
+                kernel_id = selected_choice['value']
+
+            except Exception as e:
+                self._logger.error(f"Error listing kernels: {e}")
+                self._notify_user(f"Error listing kernels: {e}", level='error')
+                return
+
+            # Shutdown the kernel asynchronously
+            try:
+                # Try to get or create event loop
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Create task in existing loop
+                        task = asyncio.create_task(self._shutdown_kernel_async(kernel_id))
+
+                        # Add error callback to the task
+                        def handle_task_exception(task):
+                            if task.exception():
+                                self._logger.error(f"Shutdown kernel task failed: {task.exception()}")
+                                try:
+                                    self.nvim.async_call(lambda: self._notify_user(f"Failed to shut down kernel: {task.exception()}", level='error'))
+                                except:
+                                    pass
+
+                        task.add_done_callback(handle_task_exception)
+                    else:
+                        # Run in existing loop
+                        loop.run_until_complete(self._shutdown_kernel_async(kernel_id))
+                except RuntimeError:
+                    # No event loop, create one
+                    asyncio.run(self._shutdown_kernel_async(kernel_id))
+            except Exception as e:
+                self._logger.error(f"Error shutting down kernel: {e}")
+                self._notify_user(f"Failed to shut down kernel: {e}", level='error')
+
+        except Exception as e:
+            self._logger.error(f"Error in QuenchShutdownKernel: {e}")
+            self._notify_user(f"Shutdown kernel error: {e}", level='error')
+
+    @pynvim.command("QuenchSelectKernel", sync=True)
+    def select_kernel_command(self):
+        """
+        Select a kernel for the current buffer. Can attach to running kernels or start new ones.
+        """
+        try:
+            self._logger.info("QuenchSelectKernel called")
+
+            # Get current buffer number
+            try:
+                current_bnum = self.nvim.current.buffer.number
+            except Exception as e:
+                self._logger.error(f"Error getting buffer number: {e}")
+                self._notify_user(f"Error accessing buffer: {e}", level='error')
+                return
+
+            # Get kernel choices (running kernels first for this command)
+            try:
+                choices = self.kernel_manager.get_kernel_choices(running_first=True)
+                if not choices:
+                    self._notify_user("No kernels available. Please install ipykernel.", level='error')
+                    return
+
+                selected_choice = self._select_from_choices_sync(choices, "Select a kernel for this buffer")
+
+                if not selected_choice:
+                    return
+
+            except Exception as e:
+                self._logger.error(f"Error getting kernel choices: {e}")
+                self._notify_user(f"Error getting kernel choices: {e}", level='error')
+                return
+
+            # Handle selection asynchronously
+            try:
+                # Try to get or create event loop
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Create task in existing loop
+                        task = asyncio.create_task(self._select_kernel_async(current_bnum, selected_choice))
+
+                        # Add error callback to the task
+                        def handle_task_exception(task):
+                            if task.exception():
+                                self._logger.error(f"Select kernel task failed: {task.exception()}")
+                                try:
+                                    self.nvim.async_call(lambda: self._notify_user(f"Failed to select kernel: {task.exception()}", level='error'))
+                                except:
+                                    pass
+
+                        task.add_done_callback(handle_task_exception)
+                    else:
+                        # Run in existing loop
+                        loop.run_until_complete(self._select_kernel_async(current_bnum, selected_choice))
+                except RuntimeError:
+                    # No event loop, create one
+                    asyncio.run(self._select_kernel_async(current_bnum, selected_choice))
+            except Exception as e:
+                self._logger.error(f"Error selecting kernel: {e}")
+                self._notify_user(f"Failed to select kernel: {e}", level='error')
+
+        except Exception as e:
+            self._logger.error(f"Error in QuenchSelectKernel: {e}")
+            self._notify_user(f"Select kernel error: {e}", level='error')
+
+    async def _start_kernel_async(self, kernel_choice):
+        """
+        Async implementation for starting a new unattached kernel.
+
+        Args:
+            kernel_choice: Name of the kernel to start
+        """
+        self._logger.debug(f"Starting new unattached kernel: {kernel_choice}")
+
+        try:
+            session = await self.kernel_manager.start_session(self.relay_queue, kernel_name=kernel_choice)
+
+            def notify_success():
+                self._notify_user(f"Started new kernel: {session.kernel_name} ({session.kernel_id[:8]})")
+
+            try:
+                self.nvim.async_call(notify_success)
+            except:
+                pass
+
+        except Exception as e:
+            self._logger.error(f"Failed to start kernel: {e}")
+            raise
+
+    async def _shutdown_kernel_async(self, kernel_id):
+        """
+        Async implementation for shutting down a kernel.
+
+        Args:
+            kernel_id: ID of the kernel to shutdown
+        """
+        self._logger.debug(f"Shutting down kernel: {kernel_id[:8]}")
+
+        try:
+            await self.kernel_manager.shutdown_session(kernel_id)
+
+            def notify_success():
+                self._notify_user(f"Kernel {kernel_id[:8]} shut down successfully")
+
+            try:
+                self.nvim.async_call(notify_success)
+            except:
+                pass
+
+        except Exception as e:
+            self._logger.error(f"Failed to shutdown kernel: {e}")
+            raise
+
+    async def _select_kernel_async(self, bnum, selected_choice):
+        """
+        Async implementation for selecting a kernel for a buffer.
+
+        Args:
+            bnum: Buffer number
+            selected_choice: Choice dictionary with 'value' and 'is_running' keys
+        """
+        self._logger.debug(f"Selecting kernel for buffer {bnum}: {selected_choice}")
+
+        async with self._cleanup_lock:
+            # Recreate web server if it was destroyed
+            if self.web_server is None:
+                self._logger.info("Recreating WebServer instance.")
+                # Use cached host and port if available, otherwise get from config
+                host = getattr(self, '_cached_web_server_host', None) or self._get_web_server_host()
+                port = getattr(self, '_cached_web_server_port', None) or self._get_web_server_port()
+                self.web_server = WebServer(
+                    host=host,
+                    port=port,
+                    nvim=self.nvim,
+                    kernel_manager=self.kernel_manager
+                )
+
+            # Start web server if not already running
+            if not self.web_server_started:
+                try:
+                    await self.web_server.start()
+                    self.web_server_started = True
+
+                    server_url = f"http://{self.web_server.host}:{self.web_server.port}"
+                    def notify_server_started():
+                        self._notify_user(f"Quench web server started at {server_url}")
+
+                    try:
+                        self.nvim.async_call(notify_server_started)
+                    except Exception:
+                        self._logger.info(f"Web server started at {server_url}")
+
+                except Exception as e:
+                    self._logger.error(f"Failed to start web server: {e}")
+                    try:
+                        self.nvim.async_call(lambda err=e: self._notify_user(f"Error starting web server: {err}", level='error'))
+                    except Exception:
+                        pass
+
+        # Start message relay loop if not running
+        if self.message_relay_task is None or self.message_relay_task.done():
+            self.message_relay_task = asyncio.create_task(self._message_relay_loop())
+            self._logger.info("Started message relay loop")
+
+        try:
+            if selected_choice['is_running']:
+                # Attach to existing kernel
+                kernel_id = selected_choice['value']
+                await self.kernel_manager.attach_buffer_to_session(bnum, kernel_id)
+
+                def notify_success():
+                    self._notify_user(f"Buffer attached to running kernel {kernel_id[:8]}")
+
+                try:
+                    self.nvim.async_call(notify_success)
+                except:
+                    pass
+            else:
+                # Start a new kernel and attach
+                kernel_choice_value = selected_choice['value']
+                try:
+                    buffer_name = self.nvim.current.buffer.name or f"buffer_{bnum}"
+                    if buffer_name:
+                        import os
+                        buffer_name = os.path.basename(buffer_name)
+                except:
+                    buffer_name = f"buffer_{bnum}"
+
+                # For "New:" selections, always create a new session
+                session = await self.kernel_manager.start_session(self.relay_queue, buffer_name, kernel_choice_value)
+                # Attach the buffer to the new session
+                await self.kernel_manager.attach_buffer_to_session(bnum, session.kernel_id)
+
+                def notify_success():
+                    self._notify_user(f"Started new kernel {session.kernel_id[:8]} and attached to buffer")
+
+                try:
+                    self.nvim.async_call(notify_success)
+                except:
+                    pass
+
+        except Exception as e:
+            self._logger.error(f"Failed to select kernel: {e}")
+            raise
 
     @pynvim.function('SayHello', sync=True)
     def say_hello_function(self, args):

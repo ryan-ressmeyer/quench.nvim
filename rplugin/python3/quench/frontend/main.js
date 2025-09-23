@@ -87,7 +87,7 @@ class QuenchClient {
                 Object.values(data.sessions).forEach(session => {
                     const option = document.createElement('option');
                     option.value = session.kernel_id;
-                    option.textContent = `${session.name} (${session.short_id}) - ${session.is_alive ? 'Active' : 'Inactive'}`;
+                    option.textContent = `${session.kernel_name} (${session.short_id}) - ${session.is_alive ? 'Active' : 'Inactive'}`;
                     this.kernelSelect.appendChild(option);
                 });
             } else {

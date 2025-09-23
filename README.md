@@ -89,6 +89,12 @@ Quench provides a comprehensive set of commands for executing code:
 | `:QuenchRunAll` | Runs all cells in the current buffer. |
 | `:QuenchStatus` | Shows the status of the Quench plugin, including the web server and active kernel sessions. ℹ️ |
 | `:QuenchStop` | Stops all Quench components, including the web server and all kernel sessions. ⏹️ |
+| `:QuenchDebug` | Shows diagnostic information for debugging plugin functionality. 🔍 |
+| `:QuenchInterruptKernel` | Sends an interrupt signal to the kernel associated with the current buffer. ⛔ |
+| `:QuenchResetKernel` | Restarts the kernel associated with the current buffer and clears its state. 🔄 |
+| `:QuenchStartKernel` | Starts a new kernel not attached to any buffers. ▶️ |
+| `:QuenchShutdownKernel` | Shuts down a running kernel and detaches any buffers linked to it. ⏹️ |
+| `:QuenchSelectKernel` | Selects a kernel for the current buffer. Can attach to running kernels or start new ones. 🎯 |
 
 For a better workflow, it's recommended to map these commands to keybindings in your Neovim configuration.
 
