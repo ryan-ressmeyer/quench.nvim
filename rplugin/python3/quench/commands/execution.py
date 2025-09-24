@@ -36,64 +36,12 @@ def _prepare_buffer_data(plugin):
         return None, None, None
 
 
-def _prepare_kernel_choice(plugin, current_bnum):
-    """Helper to select kernel synchronously."""
-    try:
-        # Get available kernels - use list_sessions method instead of direct sessions access
-        # This handles both real implementation and test mocks better
-        try:
-            available_kernels = plugin.kernel_manager.list_sessions()
-            if hasattr(available_kernels, '__iter__') and not isinstance(available_kernels, str):
-                available_kernels = list(available_kernels)
-            else:
-                # Fallback to direct sessions access if list_sessions doesn't work
-                sessions = plugin.kernel_manager.sessions
-                if hasattr(sessions, 'keys'):
-                    # Check if it's an AsyncMock (common in tests)
-                    if hasattr(sessions.keys, '_mock_name'):
-                        available_kernels = []
-                    else:
-                        available_kernels = list(sessions.keys())
-                else:
-                    available_kernels = []
-        except (AttributeError, TypeError):
-            # Fallback for test mocks - assume no kernels available
-            available_kernels = []
-
-        if not available_kernels:
-            notify_user(plugin.nvim, "No active kernels. Please start a kernel first.", level='error')
-            return None
-
-        if len(available_kernels) == 1:
-            kernel_id = available_kernels[0]
-            return {
-                'value': kernel_id,
-                'is_running': True,
-                'kernel_choice': kernel_id  # Use kernel_id as kernel_choice for simplicity
-            }
-
-        # Multiple kernels available, let user choose
-        kernel_choice = select_from_choices_sync(plugin.nvim, available_kernels, "Select kernel:")
-        if not kernel_choice:
-            notify_user(plugin.nvim, "No kernel selected", level='error')
-            return None
-
-        return {
-            'value': kernel_choice,
-            'is_running': True,
-            'kernel_choice': kernel_choice  # Use kernel_choice as kernel_choice for simplicity
-        }
-    except Exception as e:
-        plugin._logger.error(f"Error during kernel selection: {e}")
-        notify_user(plugin.nvim, f"Error selecting kernel: {e}", level='error')
-        return None
-
-
-async def run_cell_impl(plugin):
+def run_cell_impl(plugin):
     """
-    Execute the current cell in IPython kernel.
+    Execute the current cell in IPython kernel (sync wrapper for async implementation).
 
-    This is the main function users will call to execute Python code cells.
+    This function handles all synchronous UI operations first, then delegates
+    to the async implementation.
     """
     plugin._logger.info("QuenchRunCell called - starting execution")
 
@@ -118,16 +66,16 @@ async def run_cell_impl(plugin):
         notify_user(plugin.nvim, f"Error extracting cell: {e}", level='error')
         return
 
-    # Select kernel synchronously
-    kernel_choice = _prepare_kernel_choice(plugin, current_bnum)
+    # Get or select kernel synchronously
+    kernel_choice = plugin._get_or_select_kernel_sync(current_bnum)
     if not kernel_choice:
         return
 
-    # Now run the async parts using AsyncExecutor
-    await plugin._run_cell_async(current_bnum, cell_code, kernel_choice)
+    # Return the async coroutine
+    return plugin._run_cell_async(current_bnum, cell_code, kernel_choice)
 
 
-async def run_cell_advance_impl(plugin):
+def run_cell_advance_impl(plugin):
     """
     Execute the current cell and advance cursor to the line following the end of that cell.
     """
@@ -163,16 +111,16 @@ async def run_cell_advance_impl(plugin):
         plugin._logger.error(f"Error advancing cursor: {e}")
         # Don't fail execution if cursor advance fails
 
-    # Select kernel synchronously
-    kernel_choice = _prepare_kernel_choice(plugin, current_bnum)
+    # Get or select kernel synchronously
+    kernel_choice = plugin._get_or_select_kernel_sync(current_bnum)
     if not kernel_choice:
         return
 
-    # Now run the async parts using AsyncExecutor
-    await plugin._run_cell_async(current_bnum, cell_code, kernel_choice)
+    # Return the async coroutine
+    return plugin._run_cell_async(current_bnum, cell_code, kernel_choice)
 
 
-async def run_selection_impl(plugin, range_info):
+def run_selection_impl(plugin, range_info):
     """
     Execute the current selection in IPython kernel.
     """
@@ -210,16 +158,16 @@ async def run_selection_impl(plugin, range_info):
         notify_user(plugin.nvim, f"Error extracting selection: {e}", level='error')
         return
 
-    # Select kernel synchronously
-    kernel_choice = _prepare_kernel_choice(plugin, current_bnum)
+    # Get or select kernel synchronously
+    kernel_choice = plugin._get_or_select_kernel_sync(current_bnum)
     if not kernel_choice:
         return
 
-    # Now run the async parts using AsyncExecutor
-    await plugin._run_cell_async(current_bnum, selected_code, kernel_choice)
+    # Return the async coroutine
+    return plugin._run_cell_async(current_bnum, selected_code, kernel_choice)
 
 
-async def run_line_impl(plugin):
+def run_line_impl(plugin):
     """
     Execute the current line in IPython kernel.
     """
@@ -245,16 +193,16 @@ async def run_line_impl(plugin):
         notify_user(plugin.nvim, f"Error getting line content: {e}", level='error')
         return
 
-    # Select kernel synchronously
-    kernel_choice = _prepare_kernel_choice(plugin, current_bnum)
+    # Get or select kernel synchronously
+    kernel_choice = plugin._get_or_select_kernel_sync(current_bnum)
     if not kernel_choice:
         return
 
-    # Now run the async parts using AsyncExecutor
-    await plugin._run_cell_async(current_bnum, line_content, kernel_choice)
+    # Return the async coroutine
+    return plugin._run_cell_async(current_bnum, line_content, kernel_choice)
 
 
-async def run_above_impl(plugin):
+def run_above_impl(plugin):
     """
     Execute all cells above the current cursor position in IPython kernel.
     """
@@ -284,16 +232,16 @@ async def run_above_impl(plugin):
         notify_user(plugin.nvim, f"Error extracting cells above: {e}", level='error')
         return
 
-    # Select kernel synchronously
-    kernel_choice = _prepare_kernel_choice(plugin, current_bnum)
+    # Get or select kernel synchronously
+    kernel_choice = plugin._get_or_select_kernel_sync(current_bnum)
     if not kernel_choice:
         return
 
-    # Now run the async parts using AsyncExecutor
-    await plugin._run_cell_async(current_bnum, combined_code, kernel_choice)
+    # Return the async coroutine
+    return plugin._run_cell_async(current_bnum, combined_code, kernel_choice)
 
 
-async def run_below_impl(plugin):
+def run_below_impl(plugin):
     """
     Execute all cells below the current cursor position in IPython kernel.
     """
@@ -323,16 +271,16 @@ async def run_below_impl(plugin):
         notify_user(plugin.nvim, f"Error extracting cells below: {e}", level='error')
         return
 
-    # Select kernel synchronously
-    kernel_choice = _prepare_kernel_choice(plugin, current_bnum)
+    # Get or select kernel synchronously
+    kernel_choice = plugin._get_or_select_kernel_sync(current_bnum)
     if not kernel_choice:
         return
 
-    # Now run the async parts using AsyncExecutor
-    await plugin._run_cell_async(current_bnum, combined_code, kernel_choice)
+    # Return the async coroutine
+    return plugin._run_cell_async(current_bnum, combined_code, kernel_choice)
 
 
-async def run_all_impl(plugin):
+def run_all_impl(plugin):
     """
     Execute all cells in the current buffer in IPython kernel.
     """
@@ -362,10 +310,10 @@ async def run_all_impl(plugin):
         notify_user(plugin.nvim, f"Error extracting all cells: {e}", level='error')
         return
 
-    # Select kernel synchronously
-    kernel_choice = _prepare_kernel_choice(plugin, current_bnum)
+    # Get or select kernel synchronously
+    kernel_choice = plugin._get_or_select_kernel_sync(current_bnum)
     if not kernel_choice:
         return
 
-    # Now run the async parts using AsyncExecutor
-    await plugin._run_cell_async(current_bnum, combined_code, kernel_choice)
+    # Return the async coroutine
+    return plugin._run_cell_async(current_bnum, combined_code, kernel_choice)

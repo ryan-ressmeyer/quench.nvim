@@ -29,3 +29,4 @@ vim.g.python3_host_prog = '/home/ryanress/code/ubuntu-config/nvim/pynvim-env/.ve
 
 -- Configure Quench plugin settings for testing
 vim.g.quench_log_level = 'DEBUG'
+vim.g.quench_nvim_web_server_port = 8766  -- Use different port for testing to avoid conflicts

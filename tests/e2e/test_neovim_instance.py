@@ -381,6 +381,10 @@ class TestNeovimInstance:
             log_lines = log_content.split('\n')
             for line in log_lines:
                 line_lower = line.lower()
+                # Skip benign address already in use errors (port conflicts during testing)
+                if 'address already in use' in line_lower:
+                    continue
+
                 if any(keyword in line_lower for keyword in ['error', 'exception', 'traceback', 'failed']):
                     result['log_errors'].append(line)
                     result['has_errors'] = True
