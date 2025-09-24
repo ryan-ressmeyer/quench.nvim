@@ -21,7 +21,10 @@ def status_command_impl(plugin):
     try:
         # Web server status
         server_status = "running" if plugin.web_server_started else "stopped"
-        server_url = f"http://{plugin.web_server.host}:{plugin.web_server.port}"
+        if plugin.web_server:
+            server_url = f"http://{plugin.web_server.host}:{plugin.web_server.port}"
+        else:
+            server_url = "not available"
 
         # Kernel sessions status
         sessions = plugin.kernel_manager.list_sessions()
@@ -49,20 +52,6 @@ def status_command_impl(plugin):
         plugin.nvim.err_write(f"Status error: {e}\n")
 
 
-def stop_command_impl(plugin):
-    """
-    Implementation for stopping all Quench components.
-
-    Args:
-        plugin: The main Quench plugin instance
-    """
-    plugin.nvim.out_write("Stopping Quench components...\n")
-    try:
-        plugin._cleanup()
-        plugin.nvim.out_write("Quench stopped.\n")
-    except Exception as e:
-        plugin._logger.error(f"Error in QuenchStop: {e}")
-        plugin.nvim.err_write(f"Stop error: {e}\n")
 
 def debug_command_impl(plugin):
     """

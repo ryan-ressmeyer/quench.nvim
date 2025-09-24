@@ -88,12 +88,6 @@ class Quench:
         except Exception as e:
             self._logger.error(f"Error scheduling VimLeave cleanup: {e}")
 
-    def _cleanup(self):
-        """
-        This method is now deprecated in favor of the new on_vim_leave logic.
-        You can remove it or leave it, but it will no longer be called by on_vim_leave.
-        """
-        pass # This method is no longer used by the VimLeave autocmd.
 
     async def _async_cleanup(self):
         """
@@ -208,7 +202,7 @@ class Quench:
         async with self._cleanup_lock:
             # Recreate web server if it was destroyed
             if self.web_server is None:
-                self._logger.info("Recreating WebServer instance.")
+                self._logger.info("Creating WebServer instance.")
                 # Use cached host and port if available, otherwise get from config
                 host = getattr(self, '_cached_web_server_host', None) or get_web_server_host(self.nvim, self._logger)
                 port = getattr(self, '_cached_web_server_port', None) or get_web_server_port(self.nvim, self._logger)
@@ -673,14 +667,6 @@ class Quench:
             self._logger.error(f"Failed to select kernel: {e}")
             raise
 
-    @pynvim.function('SayHello', sync=True)
-    def say_hello_function(self, args):
-        """
-        Simple function for testing plugin functionality.
-        """
-        name = args[0] if args else 'stranger'
-        return f"Hello, {name}!"
-
     # Debug Commands
     @pynvim.command('QuenchStatus', sync=True)
     def status_command(self):
@@ -695,8 +681,18 @@ class Quench:
         """
         Stop all Quench components.
         """
-        from .commands.debug import stop_command_impl
-        return stop_command_impl(self)
+        self.nvim.out_write("Stopping Quench components...\n")
+        try:
+            # Use the same async cleanup pattern as VimLeave
+            loop = asyncio.get_running_loop()
+            asyncio.run_coroutine_threadsafe(self._async_cleanup(), loop)
+            self.nvim.out_write("Quench cleanup scheduled.\n")
+        except RuntimeError:
+            # No running loop - this shouldn't happen in normal pynvim context
+            self.nvim.err_write("No async event loop available for cleanup.\n")
+        except Exception as e:
+            self._logger.error(f"Error in QuenchStop: {e}")
+            self.nvim.err_write(f"Stop error: {e}\n")
 
     @pynvim.command('QuenchDebug', sync=True)
     def debug_command(self):

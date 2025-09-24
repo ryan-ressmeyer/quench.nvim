@@ -16,7 +16,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'rplugin'
 
 from quench.web_server import WebServer, DateTimeEncoder
 
-
 class TestDateTimeEncoder:
     """Test cases for the DateTimeEncoder class."""
     
