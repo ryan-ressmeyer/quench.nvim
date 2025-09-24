@@ -78,6 +78,7 @@
             padding: 6px 12px;
             font-size: 0.85em;
             font-family: inherit;
+            min-width: 350px;
         }
 
         #kernel-select:focus {
@@ -86,20 +87,15 @@
             box-shadow: 0 0 0 1px #007acc;
         }
 
-        #refresh-kernels {
-            background-color: #3c3c3c;
-            color: #d4d4d4;
-            border: 1px solid #555;
-            border-radius: 4px;
-            padding: 6px 12px;
-            font-size: 0.85em;
-            cursor: pointer;
-            transition: background-color 0.2s, border-color 0.2s;
+        #kernel-count-container {
+            margin-left: 8px;
+            font-size: 0.8em;
+            color: #7d8590;
         }
 
-        #refresh-kernels:hover {
-            background-color: #484848;
-            border-color: #666;
+        #kernel-count {
+            color: #58a6ff;
+            font-weight: bold;
         }
 
         #kernel-info-toggle.connected {
@@ -367,7 +363,7 @@
             top: 100%;
             right: 0;
             z-index: 20;
-            min-width: 300px;
+            min-width: 450px;
             margin-top: 5px;
             background-color: #252526;
             border: 1px solid #333;
@@ -464,8 +460,10 @@
                     <select id="kernel-select">
                         <option value="">Loading kernels...</option>
                     </select>
+                    <span id="kernel-count-container" style="display: none;">
+                        (<span id="kernel-count">0</span>)
+                    </span>
                 </div>
-                <button id="refresh-kernels">Refresh</button>
                 <button id="autoscroll-toggle" class="autoscroll-on" title="Toggle autoscrolling">Autoscroll On</button>
                 <div class="kernel-details-container">
                     <button id="kernel-info-toggle" title="View kernel status and details" class="disconnected">⬡</button>

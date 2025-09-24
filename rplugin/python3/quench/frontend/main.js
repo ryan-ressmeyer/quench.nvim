@@ -5,7 +5,8 @@ class QuenchClient {
         this.cells = new Map(); // Map from msg_id to cell element
         this.outputArea = null;
         this.kernelSelect = null;
-        this.refreshButton = null;
+        this.kernelCountContainer = null;
+        this.kernelCount = null;
         this.kernelInfoToggle = null;
         this.kernelInfoDropdown = null;
         this.kernelDetails = {}; // Store detailed kernel information
@@ -14,7 +15,9 @@ class QuenchClient {
         this.isAutoscrollEnabled = true; // Track autoscroll state
         this.activeCellElement = null;     // Tracks the most recently updated cell
         this.isProgrammaticScroll = false; // Differentiates script vs. user scrolls
-        
+        this.isKernelDataLoaded = false; // Track if kernel data is loaded
+        this.loadingTimeout = null; // Timeout for loading fallback
+
         this.init();
     }
 
@@ -22,14 +25,15 @@ class QuenchClient {
         // Get DOM elements
         this.outputArea = document.getElementById('output-area');
         this.kernelSelect = document.getElementById('kernel-select');
-        this.refreshButton = document.getElementById('refresh-kernels');
+        this.kernelCountContainer = document.getElementById('kernel-count-container');
+        this.kernelCount = document.getElementById('kernel-count');
         this.kernelInfoToggle = document.getElementById('kernel-info-toggle');
         this.kernelInfoDropdown = document.getElementById('kernel-info-dropdown');
         this.autoscrollButton = document.getElementById('autoscroll-toggle');
-        
+
         // Set up event handlers
         this.kernelSelect.addEventListener('change', () => this.onKernelSelected());
-        this.refreshButton.addEventListener('click', () => this.loadKernels());
+        this.kernelSelect.addEventListener('mousedown', (e) => this.handleDropdownClick(e));
         this.kernelInfoToggle.addEventListener('click', () => this.toggleKernelInfoDropdown());
         this.autoscrollButton.addEventListener('click', () => this.toggleAutoscroll());
         this.updateAutoscrollButton();
@@ -44,7 +48,7 @@ class QuenchClient {
             }
         });
         
-        // Load available kernels
+        // Load available kernels on startup
         this.loadKernels();
         
         // Also check URL for kernel_id (backward compatibility)
@@ -71,23 +75,71 @@ class QuenchClient {
         });
     }
 
+    handleDropdownClick(e) {
+        if (!this.isKernelDataLoaded) {
+            // Prevent dropdown from opening until data is loaded
+            e.preventDefault();
+
+            // Start loading kernels
+            this.loadKernels();
+
+            // Set timeout for fallback message
+            if (this.loadingTimeout) {
+                clearTimeout(this.loadingTimeout);
+            }
+
+            this.loadingTimeout = setTimeout(() => {
+                if (!this.isKernelDataLoaded) {
+                    this.kernelSelect.innerHTML = '<option value="">Loading kernels is taking longer than expected...</option>';
+                    // Allow dropdown to open now
+                    this.kernelSelect.size = 0; // Reset size to allow normal dropdown
+                }
+            }, 3000); // 3 second timeout
+        } else {
+            // Data is loaded, refresh it
+            this.loadKernels();
+        }
+    }
+
     async loadKernels() {
         try {
-            this.kernelSelect.innerHTML = '<option value="">Loading kernels...</option>';
-            
+            // Set loading state without changing dropdown content if not already loading
+            const wasLoading = this.kernelSelect.innerHTML.includes('Loading kernels...');
+            if (!wasLoading) {
+                this.kernelSelect.innerHTML = '<option value="">Loading kernels...</option>';
+            }
+
             const response = await fetch('/api/sessions');
             const data = await response.json();
-            
+
+            // Clear any loading timeout
+            if (this.loadingTimeout) {
+                clearTimeout(this.loadingTimeout);
+                this.loadingTimeout = null;
+            }
+
             this.kernelSelect.innerHTML = '<option value="">Select a kernel...</option>';
-            
-            if (data.sessions && Object.keys(data.sessions).length > 0) {
+
+            const sessions = data.sessions || {};
+            const sessionCount = Object.keys(sessions).length;
+
+            // Update the kernel count display
+            if (this.kernelCount) {
+                this.kernelCount.textContent = sessionCount;
+                if (this.kernelCountContainer) {
+                    this.kernelCountContainer.style.display = sessionCount > 0 ? 'inline-block' : 'none';
+                }
+            }
+
+            if (sessionCount > 0) {
                 // Store detailed kernel information
-                this.kernelDetails = data.sessions;
-                
-                Object.values(data.sessions).forEach(session => {
+                this.kernelDetails = sessions;
+
+                Object.values(sessions).forEach(session => {
                     const option = document.createElement('option');
                     option.value = session.kernel_id;
-                    option.textContent = `${session.kernel_name} (${session.short_id}) - ${session.is_alive ? 'Active' : 'Inactive'}`;
+                    const bufferCount = session.associated_buffers.length;
+                    option.textContent = `${session.kernel_name} (${session.short_id}) - ${bufferCount} buffer${bufferCount !== 1 ? 's' : ''}`;
                     this.kernelSelect.appendChild(option);
                 });
             } else {
@@ -96,9 +148,19 @@ class QuenchClient {
                 option.textContent = 'No kernels available - run :QuenchRunCell in Neovim';
                 this.kernelSelect.appendChild(option);
             }
+
+            // Mark data as loaded
+            this.isKernelDataLoaded = true;
         } catch (error) {
             console.error('Failed to load kernels:', error);
             this.kernelSelect.innerHTML = '<option value="">Error loading kernels</option>';
+            this.isKernelDataLoaded = true; // Mark as "loaded" to prevent endless retries
+
+            // Clear any loading timeout
+            if (this.loadingTimeout) {
+                clearTimeout(this.loadingTimeout);
+                this.loadingTimeout = null;
+            }
         }
     }
 
@@ -234,7 +296,12 @@ class QuenchClient {
             case 'quench_cell_status':
                 this.handleCellStatus(message);
                 break;
-                
+
+            case 'kernel_update':
+                console.log('Kernel update received, reloading kernel list.');
+                this.loadKernels();
+                break;
+
             default:
                 console.log(`Unhandled message type: ${msgType}`);
         }

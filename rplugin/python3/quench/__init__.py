@@ -177,6 +177,9 @@ class Quench:
             # 3. Shutdown all kernel sessions
             if self.kernel_manager:
                 try:
+                    # Notify clients before shutting down kernel sessions
+                    if self.web_server and self.web_server_started:
+                        await self.web_server.broadcast_kernel_update()
                     await self.kernel_manager.shutdown_all_sessions()
                     self._logger.info("All kernel sessions shut down.")
                 except Exception as e:
@@ -449,6 +452,10 @@ class Quench:
                 buffer_name,
                 kernel_choice_value
             )
+
+            # Notify clients of kernel list changes
+            if self.web_server and self.web_server_started:
+                await self.web_server.broadcast_kernel_update()
         
         # Start message relay loop if not running
         if self.message_relay_task is None or self.message_relay_task.done():

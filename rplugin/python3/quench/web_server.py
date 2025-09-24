@@ -334,8 +334,29 @@ class WebServer:
     def get_all_connection_counts(self) -> Dict[str, int]:
         """
         Get connection counts for all kernels.
-        
+
         Returns:
             Dict[str, int]: Mapping of kernel_id to connection count
         """
         return {kernel_id: len(connections) for kernel_id, connections in self.active_connections.items()}
+
+    async def broadcast_kernel_update(self):
+        """
+        Broadcasts a kernel update notification to all connected clients.
+        This is used to notify clients when kernel lists change so they can refresh.
+        """
+        update_message = {
+            'msg_type': 'kernel_update',
+            'content': {'status': 'kernels_changed'}
+        }
+        all_connections = []
+        for connections in self.active_connections.values():
+            all_connections.extend(connections)
+
+        for ws in all_connections:
+            if not ws.closed:
+                try:
+                    await ws.send_str(json.dumps(update_message, cls=DateTimeEncoder))
+                    self._logger.debug("Sent kernel update notification to client")
+                except Exception as e:
+                    self._logger.warning(f"Failed to send kernel update to a client: {e}")

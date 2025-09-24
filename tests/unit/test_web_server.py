@@ -545,6 +545,57 @@ class TestWebServer:
         """Test getting connection counts when no connections exist."""
         assert self.web_server.get_all_connection_counts() == {}
 
+    @pytest.mark.asyncio
+    async def test_broadcast_kernel_update_no_connections(self):
+        """Test broadcast_kernel_update when no connections exist."""
+        # Should complete without error even with no connections
+        await self.web_server.broadcast_kernel_update()
+
+    @pytest.mark.asyncio
+    async def test_broadcast_kernel_update_success(self):
+        """Test broadcast_kernel_update with active connections."""
+        # Create mock WebSocket connections
+        mock_ws1 = AsyncMock()
+        mock_ws1.closed = False
+        mock_ws1.send_str = AsyncMock()
+
+        mock_ws2 = AsyncMock()
+        mock_ws2.closed = False
+        mock_ws2.send_str = AsyncMock()
+
+        # Add mock connections to different kernels
+        self.web_server.active_connections['kernel1'] = {mock_ws1}
+        self.web_server.active_connections['kernel2'] = {mock_ws2}
+
+        # Call broadcast_kernel_update
+        await self.web_server.broadcast_kernel_update()
+
+        # Verify that both connections received the kernel update message
+        expected_message = json.dumps({
+            'msg_type': 'kernel_update',
+            'content': {'status': 'kernels_changed'}
+        }, cls=DateTimeEncoder)
+
+        mock_ws1.send_str.assert_called_once_with(expected_message)
+        mock_ws2.send_str.assert_called_once_with(expected_message)
+
+    @pytest.mark.asyncio
+    async def test_broadcast_kernel_update_closed_connection(self):
+        """Test broadcast_kernel_update skips closed connections."""
+        # Create mock WebSocket connection that is closed
+        mock_ws = AsyncMock()
+        mock_ws.closed = True
+        mock_ws.send_str = AsyncMock()
+
+        # Add mock connection
+        self.web_server.active_connections['kernel1'] = {mock_ws}
+
+        # Call broadcast_kernel_update
+        await self.web_server.broadcast_kernel_update()
+
+        # Verify that closed connection was not sent a message
+        mock_ws.send_str.assert_not_called()
+
 
 if __name__ == '__main__':
     pytest.main([__file__])
