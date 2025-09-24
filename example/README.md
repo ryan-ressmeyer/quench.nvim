@@ -80,7 +80,6 @@ plt.show()  # This appears in browser!
 | `:call QuenchRunCell()` | Execute current cell |
 | `:QuenchStatus` | Show plugin status |
 | `:QuenchStop` | Stop all plugin components |
-| `:HelloWorld` | Test plugin is loaded |
 
 ## Recommended Key Mappings
 

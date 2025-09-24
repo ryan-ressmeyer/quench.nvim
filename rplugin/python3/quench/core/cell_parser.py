@@ -8,9 +8,9 @@ import re
 from typing import List, Tuple
 
 
-def extract_cell_code_sync(lines: List[str], lnum: int, delimiter_pattern: str) -> Tuple[str, int, int]:
+def extract_cell(lines: List[str], lnum: int, delimiter_pattern: str) -> Tuple[str, int, int]:
     """
-    Extract cell code synchronously (no async calls).
+    Extract a code cell.
 
     Args:
         lines: List of buffer lines

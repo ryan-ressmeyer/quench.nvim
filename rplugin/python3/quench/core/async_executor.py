@@ -2,14 +2,12 @@
 AsyncExecutor - Standardized async execution patterns for Quench plugin.
 
 This module provides centralized async execution handling to eliminate the
-repetitive boilerplate found in 8+ commands throughout the main plugin file.
+repetitive boilerplate.
 """
 
 import asyncio
 import logging
-from typing import Callable, Any, Awaitable, Optional
-import functools
-
+from typing import Any, Awaitable, Optional
 
 class AsyncExecutor:
     """
@@ -100,72 +98,3 @@ class AsyncExecutor:
         except RuntimeError:
             # No event loop exists - create new one
             return asyncio.run(self.execute_async(coro, error_context))
-
-    def create_background_task(self, coro: Awaitable[Any], error_context: str = "background operation") -> Optional[asyncio.Task]:
-        """
-        Create a background task if we're in an async context.
-
-        Args:
-            coro: The coroutine to execute
-            error_context: Context string for error messages
-
-        Returns:
-            The created task if successful, None otherwise
-        """
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                task = asyncio.create_task(self.execute_async(coro, error_context))
-
-                def handle_task_exception(task):
-                    """Handle exceptions from background tasks"""
-                    if task.exception():
-                        self._logger.error(f"Background task failed in {error_context}: {task.exception()}")
-
-                task.add_done_callback(handle_task_exception)
-                return task
-        except RuntimeError:
-            self._logger.warning(f"Cannot create background task for {error_context}: no event loop")
-        return None
-
-
-def async_command(error_context: str = "command"):
-    """
-    Decorator to standardize async command execution in pynvim commands.
-
-    This decorator eliminates the boilerplate async execution code that was
-    repeated in 8+ commands throughout the main plugin file.
-
-    Args:
-        error_context: Context string for error messages
-
-    Usage:
-        @async_command("cell execution")
-        def run_cell(self):
-            return self._run_cell_async()
-
-        async def _run_cell_async(self):
-            # Actual async implementation
-            pass
-    """
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
-        def wrapper(self, *args, **kwargs):
-            # Get the coroutine from the wrapped function
-            coro = func(self, *args, **kwargs)
-
-            # Execute using the plugin's async executor
-            if hasattr(self, 'async_executor'):
-                return self.async_executor.execute_sync(coro, error_context)
-            else:
-                # Fallback for testing or if async_executor not initialized
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        return asyncio.create_task(coro)
-                    else:
-                        return loop.run_until_complete(coro)
-                except RuntimeError:
-                    return asyncio.run(coro)
-        return wrapper
-    return decorator

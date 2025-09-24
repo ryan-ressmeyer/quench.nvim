@@ -14,16 +14,8 @@ from .ui_manager import NvimUIManager
 from .utils.notifications import notify_user, select_from_choices_sync
 
 # Import core modules
-from .core.config import get_cell_delimiter, get_web_server_host, get_web_server_port
-from .core.cell_parser import (
-    extract_cell_code_sync,
-    extract_cells_above,
-    extract_cells_below,
-    extract_all_cells
-)
-from .core.async_executor import AsyncExecutor, async_command
-
-
+from .core.config import get_web_server_host, get_web_server_port
+from .core.async_executor import AsyncExecutor 
 
 @pynvim.plugin
 class Quench:
@@ -73,11 +65,6 @@ class Quench:
         self._cleanup_lock = asyncio.Lock()  # Lock to manage cleanup process
 
         self._logger.info("Quench plugin initialized")
-
-
-
-
-
 
     @pynvim.autocmd("VimLeave", sync=True)
     def on_vim_leave(self):
@@ -710,14 +697,6 @@ class Quench:
         """
         from .commands.debug import stop_command_impl
         return stop_command_impl(self)
-
-    @pynvim.command('HelloWorld', sync=True)
-    def hello_world_command(self):
-        """
-        Simple hello world command for testing plugin loading.
-        """
-        from .commands.debug import hello_world_command_impl
-        return hello_world_command_impl(self)
 
     @pynvim.command('QuenchDebug', sync=True)
     def debug_command(self):

@@ -87,29 +87,8 @@ class TestQuenchPlugin:
             MockKernelManager.assert_called_once()
             MockUIManager.assert_called_once_with(self.mock_nvim)
             MockWebServer.assert_called_once()
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    def test_hello_world_command(self):
-        """Test the HelloWorld command."""
-        with patch('quench.KernelSessionManager'), \
-             patch('quench.WebServer'), \
-             patch('quench.NvimUIManager'):
-            
-            plugin = Quench(self.mock_nvim)
-            plugin.hello_world_command()
-            
-            assert len(self.mock_nvim.output_messages) == 1
-            assert "Hello, world from Quench plugin!" in self.mock_nvim.output_messages[0]
-    
-    def test_say_hello_function(self):
+   
+       def test_say_hello_function(self):
         """Test the SayHello function."""
         with patch('quench.KernelSessionManager'), \
              patch('quench.WebServer'), \
@@ -764,7 +743,6 @@ class TestQuenchPlugin:
                 'status_command': 'QuenchStatus',
                 'stop_command': 'QuenchStop',
                 'debug_command': 'QuenchDebug',
-                'hello_world_command': 'HelloWorld',
 
                 # Kernel management commands
                 'interrupt_kernel_command': 'QuenchInterruptKernel',
@@ -804,7 +782,7 @@ class TestQuenchPlugin:
 
             # Test that all command methods exist and don't raise AttributeError when accessed
             command_methods = [
-                'status_command', 'stop_command', 'debug_command', 'hello_world_command',
+                'status_command', 'stop_command', 'debug_command',
                 'interrupt_kernel_command', 'reset_kernel_command', 'start_kernel_command',
                 'shutdown_kernel_command', 'select_kernel_command',
                 'run_cell', 'run_cell_advance', 'run_selection', 'run_line',

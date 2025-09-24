@@ -64,17 +64,6 @@ def stop_command_impl(plugin):
         plugin._logger.error(f"Error in QuenchStop: {e}")
         plugin.nvim.err_write(f"Stop error: {e}\n")
 
-
-def hello_world_command_impl(plugin):
-    """
-    Implementation for simple hello world command for testing plugin loading.
-
-    Args:
-        plugin: The main Quench plugin instance
-    """
-    plugin.nvim.out_write("Hello, world from Quench plugin!\n")
-
-
 def debug_command_impl(plugin):
     """
     Implementation for debug command to test plugin functionality and show diagnostics.

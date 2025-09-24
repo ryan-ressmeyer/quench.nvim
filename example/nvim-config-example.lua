@@ -53,9 +53,6 @@ vim.api.nvim_create_autocmd("FileType", {
     
     -- Stop plugin (for troubleshooting)
     vim.keymap.set('n', '<leader>x', ':QuenchStop<CR>', opts)
-    
-    -- Test plugin is working
-    vim.keymap.set('n', '<leader>h', ':HelloWorld<CR>', opts)
   end
 })
 
@@ -208,16 +205,3 @@ vim.api.nvim_create_user_command("QuenchHelp", function()
   print("  Browser: http://" .. host .. ":" .. port .. "?kernel_id=<ID>")
 end, { desc = "Show Quench help" })
 
--- ============================================================================
--- CONFIGURATION VALIDATION
--- ============================================================================
-
--- Check if plugin is properly installed
-vim.defer_fn(function()
-  local has_quench = vim.fn.exists(":HelloWorld") == 2
-  if not has_quench then
-    vim.notify("Quench plugin not found. Run :UpdateRemotePlugins and restart Neovim.", vim.log.levels.WARN)
-  end
-end, 2000)
-
-print("Quench configuration loaded! Use :QuenchHelp for usage info.")

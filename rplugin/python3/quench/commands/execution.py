@@ -13,7 +13,7 @@ These are implementation functions only - decorators are in the main plugin clas
 
 from ..core.config import get_cell_delimiter
 from ..core.cell_parser import (
-    extract_cell_code_sync,
+    extract_cell,
     extract_cells_above,
     extract_cells_below,
     extract_all_cells
@@ -53,7 +53,7 @@ def run_cell_impl(plugin):
     # Extract cell code synchronously
     try:
         delimiter_pattern = get_cell_delimiter(plugin.nvim, plugin._logger)
-        cell_code, cell_start_line, cell_end_line = extract_cell_code_sync(lines, current_line, delimiter_pattern)
+        cell_code, cell_start_line, cell_end_line = extract_cell(lines, current_line, delimiter_pattern)
         if not cell_code.strip():
             notify_user(plugin.nvim, "No code found in current cell")
             return
@@ -89,7 +89,7 @@ def run_cell_advance_impl(plugin):
     # Extract cell code and get end line
     try:
         delimiter_pattern = get_cell_delimiter(plugin.nvim, plugin._logger)
-        cell_code, cell_start_line, cell_end_line = extract_cell_code_sync(lines, current_line, delimiter_pattern)
+        cell_code, cell_start_line, cell_end_line = extract_cell(lines, current_line, delimiter_pattern)
         if not cell_code.strip():
             notify_user(plugin.nvim, "No code found in current cell")
             return

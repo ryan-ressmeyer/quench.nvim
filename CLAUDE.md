@@ -44,7 +44,6 @@ This is a fully implemented and production-ready plugin with comprehensive testi
   - `QuenchRunCell` - Execute Python cells with `#%%` delimiters
   - `QuenchStatus` - Display plugin status and active sessions
   - `QuenchStop` - Stop all plugin components
-  - `HelloWorld` - Basic connectivity test (kept for backward compatibility)
 - Complete kernel session management with IPython integration
 - Web server with WebSocket relay for rich media output
 - UI manager for Neovim API interactions
