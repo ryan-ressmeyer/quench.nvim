@@ -92,6 +92,13 @@ def pytest_collection_modifyitems(config, items):
                     item.add_marker(pytest.mark.skip(reason="jupyter_client not available"))
 
 
+def pytest_configure(config):
+    """Configure pytest with custom markers."""
+    config.addinivalue_line(
+        "markers", "e2e: marks tests as end-to-end (deselect with '-m \"not e2e\"')"
+    )
+
+
 def pytest_report_header(config):
     """Add information about available dependencies to test report header."""
     deps = []

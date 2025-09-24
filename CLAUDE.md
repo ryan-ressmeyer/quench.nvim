@@ -139,6 +139,22 @@ lua/quench/init.lua      # Basic Lua module setup
 - Resource cleanup on plugin shutdown via `VimLeave` autocmd
 - Robust async task management with proper cancellation
 
+### **CRITICAL: Synchronous UI Requirements**
+**User interface operations MUST be executed synchronously to preserve pynvim context.**
+
+#### UI Operations That MUST Be Synchronous:
+- All `nvim` object interactions (`nvim.out_write()`, `nvim.command()`, `nvim.call()`)
+- User input collection and choice presentation
+- Error notifications to user
+- Buffer and cursor operations
+
+#### Backend Operations That CAN Be Asynchronous:
+- Kernel process management and startup
+- IPython kernel communication
+- Web server operations
+- File I/O and network requests
+- Long-running computations
+
 ### Web Server Integration  
 - Default server: `http://127.0.0.1:8765`
 - WebSocket endpoints: `/ws/{kernel_id}` for real-time output

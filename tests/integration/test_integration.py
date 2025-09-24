@@ -259,7 +259,7 @@ for i in range(3):
     
     def test_plugin_structure_exists(self):
         """Test that all expected plugin files exist."""
-        plugin_dir = Path(__file__).parent.parent / 'rplugin' / 'python3' / 'quench'
+        plugin_dir = Path(__file__).parent.parent.parent / 'rplugin' / 'python3' / 'quench'
         
         expected_files = [
             '__init__.py',

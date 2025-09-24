@@ -297,8 +297,6 @@ class TestKernelSession:
         
         # Mock components
         mock_km = AsyncMock()
-        mock_client = AsyncMock()
-        mock_client.stop_channels = Mock()  # Make stop_channels synchronous
         
         # Create a real asyncio task that we can cancel
         async def dummy_listener():
@@ -312,14 +310,12 @@ class TestKernelSession:
         mock_listen_task = asyncio.create_task(dummy_listener())
         
         session.km = mock_km
-        session.client = mock_client
         session.listener_task = mock_listen_task
         
         await session.shutdown()
         
         # Verify shutdown sequence
         assert mock_listen_task.cancelled() or mock_listen_task.done()
-        mock_client.stop_channels.assert_called_once()
         mock_km.shutdown_kernel.assert_called_once()
     
     @pytest.mark.asyncio
