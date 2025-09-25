@@ -708,16 +708,36 @@ class Quench:
         """
         Send an interrupt signal to the kernel associated with the current buffer.
         """
-        from .commands.kernel_mgmt import interrupt_kernel_command_impl
-        return self.async_executor.execute_sync(interrupt_kernel_command_impl(self), "kernel interruption")
+        self._logger.info("QuenchInterruptKernel called")
+
+        # Synchronous UI operations (get current buffer number)
+        try:
+            current_bnum = self.nvim.current.buffer.number
+        except Exception as e:
+            self._logger.error(f"Error getting buffer number: {e}")
+            notify_user(self.nvim, f"Error accessing buffer: {e}", level='error')
+            return
+
+        # Asynchronous backend operations (kernel interruption)
+        return self.async_executor.execute_sync(self._interrupt_kernel_async(current_bnum), "kernel interruption")
 
     @pynvim.command('QuenchResetKernel', sync=True)
     def reset_kernel_command(self):
         """
         Restart the kernel associated with the current buffer and clear its state.
         """
-        from .commands.kernel_mgmt import reset_kernel_command_impl
-        return self.async_executor.execute_sync(reset_kernel_command_impl(self), "kernel reset")
+        self._logger.info("QuenchResetKernel called")
+
+        # Synchronous UI operations (get current buffer number)
+        try:
+            current_bnum = self.nvim.current.buffer.number
+        except Exception as e:
+            self._logger.error(f"Error getting buffer number: {e}")
+            notify_user(self.nvim, f"Error accessing buffer: {e}", level='error')
+            return
+
+        # Asynchronous backend operations (kernel reset)
+        return self.async_executor.execute_sync(self._reset_kernel_async(current_bnum), "kernel reset")
 
     @pynvim.command('QuenchStartKernel', sync=True)
     def start_kernel_command(self):
