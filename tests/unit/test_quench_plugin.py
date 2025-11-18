@@ -87,23 +87,7 @@ class TestQuenchPlugin:
             MockKernelManager.assert_called_once()
             MockUIManager.assert_called_once_with(self.mock_nvim)
             MockWebServer.assert_called_once()
-   
-       def test_say_hello_function(self):
-        """Test the SayHello function."""
-        with patch('quench.KernelSessionManager'), \
-             patch('quench.WebServer'), \
-             patch('quench.NvimUIManager'):
-            
-            plugin = Quench(self.mock_nvim)
-            
-            # Test with name
-            result = plugin.say_hello_function(['Alice'])
-            assert result == "Hello, Alice!"
-            
-            # Test without name
-            result = plugin.say_hello_function([])
-            assert result == "Hello, stranger!"
-    
+
     def test_run_cell_no_code_found(self):
         """Test QuenchRunCell with empty cell."""
         with patch('quench.KernelSessionManager'), \
@@ -203,16 +187,18 @@ class TestQuenchPlugin:
             MockKernelManager.return_value = mock_kernel_manager
             
             # Mock kernel manager to have no available kernels (simulates failure)
+            mock_kernel_manager.get_kernel_choices = Mock(return_value=[])
             mock_kernel_manager.list_sessions = Mock(return_value=[])
             mock_kernel_manager.sessions = {}
+            mock_kernel_manager.buffer_to_kernel_map = {}
 
             plugin = Quench(self.mock_nvim)
             plugin.run_cell()
 
             # Should handle the error gracefully with no available kernels message
-            # Check both output and error messages since notify_user with level='error' might go to different place
+            # Check both output and error messages since err_write goes to error_messages
             all_messages = self.mock_nvim.output_messages + getattr(self.mock_nvim, 'error_messages', [])
-            assert any("No active kernels" in msg for msg in all_messages)
+            assert any("No Jupyter kernels found" in msg for msg in all_messages)
     
     def test_run_cell_advance(self):
         """Test QuenchRunCellAdvance command."""
@@ -795,9 +781,9 @@ class TestQuenchPlugin:
                 assert method is not None, f"Command method '{method_name}' not found on plugin"
                 assert callable(method), f"Command method '{method_name}' is not callable"
 
-            # Verify we have exactly 16 commands (all expected commands)
+            # Verify we have exactly 15 commands (all expected commands)
             actual_command_count = len(command_methods)
-            assert actual_command_count == 16, f"Expected 16 commands, found {actual_command_count}"
+            assert actual_command_count == 15, f"Expected 15 commands, found {actual_command_count}"
 
     def test_start_kernel_command_bug_reproduction(self):
         """Test QuenchStartKernel to reproduce the reported bug."""

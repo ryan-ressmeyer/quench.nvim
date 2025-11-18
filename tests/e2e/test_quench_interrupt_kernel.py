@@ -76,6 +76,9 @@ async def test_quench_interrupt_kernel():
         log_content = nvim_instance.get_log_tail()
         error_check = nvim_instance.check_for_errors_and_warnings()
 
+        # Filter out KeyboardInterrupt errors - these are EXPECTED when interrupting
+        error_check = filter_expected_interrupt_errors(error_check)
+
         # Step 6: Check if interrupt was successful
         interrupt_results = analyze_interrupt_success(all_messages, log_content)
 
@@ -172,6 +175,92 @@ Code Completed: {test_results['code_completed']} ✅ (correctly False)
     finally:
         # Cleanup
         await nvim_instance.cleanup()
+
+
+def filter_expected_interrupt_errors(error_check: dict) -> dict:
+    """
+    Filter out KeyboardInterrupt errors from error check results.
+
+    When testing interrupt functionality, KeyboardInterrupt errors are EXPECTED
+    and should not cause test failures. This includes:
+    - KeyboardInterrupt exception messages
+    - DEBUG logs about processing error messages (normal flow)
+    - Cell status messages with 'completed_error' (expected for interrupts)
+
+    Args:
+        error_check: Dictionary from check_for_errors_and_warnings()
+
+    Returns:
+        Modified error_check dictionary with KeyboardInterrupt errors filtered out
+    """
+    def is_expected_interrupt_log(err: str) -> bool:
+        """Check if a log line is expected during interrupt handling."""
+        err_lower = err.lower()
+
+        # KeyboardInterrupt exceptions are expected
+        if 'keyboardinterrupt' in err_lower:
+            return True
+
+        # DEBUG logs about processing error messages are normal flow
+        if 'debug:' in err_lower and any(phrase in err_lower for phrase in [
+            'relaying message: error',
+            'relayed message from kernel',
+            'processing message type: error',
+            "sent cell status 'completed_error'",
+        ]):
+            return True
+
+        return False
+
+    filtered_check = error_check.copy()
+
+    # Filter out expected interrupt-related log errors
+    filtered_log_errors = [
+        err for err in error_check['log_errors']
+        if not is_expected_interrupt_log(err)
+    ]
+    filtered_check['log_errors'] = filtered_log_errors
+
+    # Filter out expected interrupt-related nvim errors
+    filtered_nvim_errors = [
+        err for err in error_check['nvim_errors']
+        if not is_expected_interrupt_log(err)
+    ]
+    filtered_check['nvim_errors'] = filtered_nvim_errors
+
+    # Filter out expected interrupt-related stderr errors
+    filtered_stderr_errors = [
+        err for err in error_check['stderr_errors']
+        if not is_expected_interrupt_log(err)
+    ]
+    filtered_check['stderr_errors'] = filtered_stderr_errors
+
+    # Recalculate has_errors based on filtered results
+    filtered_check['has_errors'] = bool(
+        filtered_check['log_errors'] or
+        filtered_check['nvim_errors'] or
+        filtered_check['stderr_errors']
+    )
+
+    # Update summary
+    issues = []
+    if filtered_check['nvim_errors']:
+        issues.append(f"{len(filtered_check['nvim_errors'])} Neovim errors")
+    if filtered_check['nvim_warnings']:
+        issues.append(f"{len(filtered_check['nvim_warnings'])} Neovim warnings")
+    if filtered_check['log_errors']:
+        issues.append(f"{len(filtered_check['log_errors'])} log errors")
+    if filtered_check['log_warnings']:
+        issues.append(f"{len(filtered_check['log_warnings'])} log warnings")
+    if filtered_check['stderr_errors']:
+        issues.append(f"{len(filtered_check['stderr_errors'])} stderr errors")
+
+    if issues:
+        filtered_check['summary'] = f"Found: {', '.join(issues)}"
+    else:
+        filtered_check['summary'] = "No errors or warnings detected (KeyboardInterrupt filtered)"
+
+    return filtered_check
 
 
 def analyze_interrupt_success(all_messages: list, log_content: str) -> dict:

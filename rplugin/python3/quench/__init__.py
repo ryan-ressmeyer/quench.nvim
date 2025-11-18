@@ -465,25 +465,6 @@ class Quench:
             except:
                 pass
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     async def _start_kernel_async(self, kernel_choice):
         """
         Async implementation for starting a new unattached kernel.

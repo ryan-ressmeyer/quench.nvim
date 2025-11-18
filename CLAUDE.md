@@ -17,9 +17,10 @@ This is a fully implemented and production-ready plugin with comprehensive testi
 
 ### Testing
 - `pytest tests/` - Run the full test suite
-- `pytest tests/test_unit.py` - Run unit tests only
-- `pytest tests/test_quench_main.py` - Run main plugin integration tests
-- `pytest tests/test_integration.py` - Run integration tests
+- `pytest tests/unit/` - Run unit tests only
+- `pytest tests/e2e/` - Run end-to-end integration tests
+- `pytest tests/unit/test_quench_plugin.py` - Run main plugin tests
+- `pytest tests/e2e/test_quench_run_cell.py` - Run cell execution tests
 - `pytest -v` - Run tests with verbose output
 - `pytest -k "test_name"` - Run specific test by name
 - The project uses pytest with async support and dependency detection
@@ -32,7 +33,7 @@ This is a fully implemented and production-ready plugin with comprehensive testi
 
 ### Plugin Development
 - Plugin files are in `rplugin/python3/quench/`
-- Main plugin class is in `rplugin/python3/quench/__init__.py` (1171 lines)
+- Main plugin class is in `rplugin/python3/quench/__init__.py`
 - Uses pynvim decorators: `@pynvim.plugin`, `@pynvim.command`, `@pynvim.function`
 - The Python environment for testing is managed by uv: `/home/ryanress/code/ubuntu-config/nvim/pynvim-env/.venv/bin/python`
 
@@ -50,12 +51,22 @@ This is a fully implemented and production-ready plugin with comprehensive testi
 - Frontend HTML/JS application for browser-based output display
 
 ### Additional Commands Available
+
+**Execution Commands:**
 - `QuenchRunCellAdvance` - Execute cell and move cursor to next cell
-- `QuenchRunSelection` - Execute selected text as Python code  
+- `QuenchRunSelection` - Execute selected text as Python code
 - `QuenchRunLine` - Execute current line
 - `QuenchRunAbove` - Execute all cells above current position
 - `QuenchRunBelow` - Execute all cells below current position
 - `QuenchRunAll` - Execute all cells in buffer
+
+**Kernel Management Commands:**
+- `QuenchInterruptKernel` - Send interrupt signal to the kernel (similar to Ctrl+C)
+- `QuenchResetKernel` - Restart kernel and clear its state
+- `QuenchStartKernel` - Start a new kernel not attached to any buffer
+- `QuenchShutdownKernel` - Shutdown a running kernel
+- `QuenchSelectKernel` - Select/attach kernel for current buffer
+- `QuenchDebug` - Show diagnostic information for debugging
 
 ### Key Design Patterns
 - Asyncio-based architecture for non-blocking operations
@@ -63,30 +74,59 @@ This is a fully implemented and production-ready plugin with comprehensive testi
 - Cell-based execution using `#%%` delimiters in Python files
 - Web browser integration for rich media (plots, audio, etc.)
 
+### Modular Architecture
+The plugin is organized into distinct modules for maintainability:
+- **commands/** - Command implementation functions separated from pynvim decorators
+  - Enables easier testing and reuse of command logic
+  - Separates execution commands from debug/management commands
+- **core/** - Core utilities and shared functionality
+  - Centralized async execution patterns
+  - Reusable cell parsing utilities
+  - Configuration management
+- **utils/** - Shared utility functions
+  - User notification helpers
+  - Common helper functions
+
 ### Codebase Structure
 ```
-Total: 3,806 lines of Python code
-
 Core Plugin:
 rplugin/python3/quench/
-├── __init__.py          # Main plugin class and pynvim integration (1171 lines)
-├── kernel_session.py    # IPython kernel management (348 lines)
-├── web_server.py        # Web server and WebSocket handling (339 lines)
-├── ui_manager.py        # Neovim API wrapper (197 lines)
+├── __init__.py          # Main plugin class and pynvim integration
+├── kernel_session.py    # IPython kernel management
+├── web_server.py        # Web server and WebSocket handling
+├── ui_manager.py        # Neovim API wrapper
+├── commands/            # Command implementations
+│   ├── execution.py     # Execution commands (RunCell, RunAll, etc.)
+│   └── debug.py         # Debug and status commands
+├── core/                # Core utilities
+│   ├── async_executor.py  # Async execution patterns
+│   ├── cell_parser.py     # Cell parsing utilities
+│   └── config.py          # Configuration management
+├── utils/               # Utility modules
+│   └── notifications.py   # User notification utilities
 └── frontend/            # Web frontend files
     ├── index.html       # Browser interface layout
     └── main.js          # WebSocket client and output rendering
 
 Test Suite:
 tests/
-├── conftest.py          # Test configuration and fixtures (122 lines)
-├── test_integration.py  # Integration tests (327 lines)
-├── test_quench_main.py  # Main plugin tests (684 lines)
-└── test_unit.py         # Unit tests (300 lines)
+├── conftest.py          # Test configuration and fixtures
+├── unit/                # Unit tests
+│   ├── test_kernel_session.py  # Kernel session tests
+│   ├── test_quench_plugin.py   # Main plugin tests
+│   ├── test_ui_manager.py      # UI manager tests
+│   └── test_web_server.py      # Web server tests
+└── e2e/                 # End-to-end integration tests
+    ├── test_neovim_instance.py        # Neovim integration tests
+    ├── test_quench_interrupt_kernel.py # Kernel interrupt tests
+    ├── test_quench_kernel_start.py    # Kernel start tests
+    ├── test_quench_reset_kernel.py    # Kernel reset tests
+    ├── test_quench_run_cell.py        # Cell execution tests
+    └── test_quench_stop.py            # Plugin stop tests
 
 Examples:
 example/
-├── example-usage.py     # Comprehensive demonstration (269 lines)
+├── example-usage.py     # Comprehensive demonstration
 ├── quick-start.py       # Simple validation examples
 ├── nvim-config-example.lua # Complete Neovim configuration
 └── README.md           # User getting started guide
@@ -97,11 +137,20 @@ lua/quench/init.lua      # Basic Lua module setup
 
 ## Testing Strategy
 
-**57 tests implemented** across 3,800+ lines of test code with comprehensive coverage:
-- **Unit tests** (`tests/test_unit.py`) - NvimUIManager functionality (300 lines)
-- **Plugin integration tests** (`tests/test_quench_main.py`) - Main plugin class testing (684 lines)
-- **Integration tests** (`tests/test_integration.py`) - Component interaction testing (327 lines)
-- **Test configuration** (`tests/conftest.py`) - Shared fixtures and dependency detection (122 lines)
+**136 tests implemented** with comprehensive coverage:
+- **Unit tests** (`tests/unit/`) - Component-level testing
+  - `test_kernel_session.py` - Kernel session management tests
+  - `test_quench_plugin.py` - Main plugin class tests
+  - `test_ui_manager.py` - UI manager functionality tests
+  - `test_web_server.py` - Web server tests
+- **End-to-end tests** (`tests/e2e/`) - Full integration testing
+  - `test_neovim_instance.py` - Neovim integration tests
+  - `test_quench_interrupt_kernel.py` - Kernel interrupt functionality
+  - `test_quench_kernel_start.py` - Kernel startup tests
+  - `test_quench_reset_kernel.py` - Kernel reset tests
+  - `test_quench_run_cell.py` - Cell execution tests
+  - `test_quench_stop.py` - Plugin shutdown tests
+- **Test configuration** (`tests/conftest.py`) - Shared fixtures and dependency detection
 - **Dependency detection** - Tests auto-skip when optional dependencies missing
 - **Async support** - Full pytest-asyncio integration for testing async functionality
 - **Mock-based testing** - Comprehensive mocking for kernel management without real processes

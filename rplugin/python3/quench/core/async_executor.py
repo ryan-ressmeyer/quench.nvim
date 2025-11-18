@@ -68,6 +68,10 @@ class AsyncExecutor:
         Returns:
             The result of the coroutine execution
         """
+        # Handle early returns from impl functions (e.g., validation failures)
+        if coro is None:
+            return None
+
         try:
             # Try to get current event loop
             loop = asyncio.get_event_loop()
