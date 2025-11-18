@@ -337,26 +337,31 @@ class QuenchClient {
             console.warn('Stream message without parent_header.msg_id:', message);
             return;
         }
-        
+
         // Create a cell on-demand if one doesn't exist
         if (!this.cells.has(parentMsgId)) {
             const cellElement = this.createCell(parentMsgId, '# Code executed previously');
             this.cells.set(parentMsgId, cellElement);
             this.outputArea.appendChild(cellElement);
             this.activeCellElement = cellElement;
-            
+
             // Set the sidebar to running state since we're getting output
             const sidebar = cellElement.querySelector('.cell-sidebar');
             if (sidebar) {
                 sidebar.className = 'cell-sidebar status-running';
             }
         }
-        
+
         const cell = this.cells.get(parentMsgId);
         const outputDiv = cell.querySelector('.cell-output');
-        
+
         const streamName = message.content?.name || 'stdout';
-        const text = message.content?.text || '';
+        let text = message.content?.text || '';
+
+        // FIX: Normalize CRLF (\r\n) to LF (\n).
+        // Shell commands often output \r\n which triggers the \r overwrite logic
+        // destructively. We only want \r logic for isolated carriage returns.
+        text = text.replace(/\r\n/g, '\n');
         
         // Create or find existing stream output
         let streamDiv = outputDiv.querySelector(`[data-stream="${streamName}"]`);

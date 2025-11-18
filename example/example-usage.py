@@ -1,28 +1,76 @@
 #%%
-# Quench Plugin Example Usage
-# This file demonstrates all core functionality of the Quench Neovim plugin
-# for interactive Python development with cell-based execution.
+# ==============================================================================
+# SECTION 1: QUICK START - Getting Started with Quench
+# ==============================================================================
+# Cell 1: Simple "Hello World" test
+# Execute this cell to test your plugin installation
 
-print("Welcome to Quench! This is your first Python cell.")
+print("🚀 Quench is working!")
+print("This output appears in Neovim")
 print("Position your cursor anywhere in this cell and run :call QuenchRunCell()")
 
 #%%
-# Cell 2: Basic Python execution
-# This cell shows how regular Python code execution works
+# Cell 2: State persistence test
+# This demonstrates that variables persist between cell executions
 
-import numpy as np
-import matplotlib.pyplot as plt
+name = "Quench User"
+numbers = [1, 2, 3, 4, 5]
 
-# Create some sample data
-x = np.linspace(0, 2 * np.pi, 100)
-y = np.sin(x)
-
-print(f"Created data arrays: x.shape={x.shape}, y.shape={y.shape}")
-print(f"Min/Max values: y_min={y.min():.2f}, y_max={y.max():.2f}")
+print(f"Hello, {name}!")
+print(f"Sum of numbers: {sum(numbers)}")
+print("✅ Variables persist across cells - try accessing 'name' or 'numbers' in the next cell!")
 
 #%%
-# Cell 3: Rich media output (plots)
-# This cell demonstrates how Quench displays plots in the browser
+# Cell 3: Basic plotting with rich output
+# This tests matplotlib integration and browser display
+
+try:
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    x = np.linspace(0, 10, 50)
+    y = np.sin(x)
+
+    plt.figure(figsize=(8, 4))
+    plt.plot(x, y, 'b-', linewidth=2)
+    plt.title('Sine Wave - Rich Output Test')
+    plt.xlabel('x')
+    plt.ylabel('sin(x)')
+    plt.grid(True)
+    plt.show()
+
+    print("✅ Rich output (plot) should appear in browser!")
+    print("🌐 Check your browser at the URL shown in Neovim")
+
+except ImportError:
+    print("📦 Install matplotlib and numpy for rich output:")
+    print("   pip install matplotlib numpy")
+
+#%%
+# Cell 4: Error handling demonstration
+# This shows how Quench displays errors in both Neovim and browser
+
+print("Testing error handling...")
+
+try:
+    result = 10 / 0
+except ZeroDivisionError:
+    print("✅ Error handling works - errors appear in both Neovim and browser")
+
+print("🎉 Quick start complete! Continue below for comprehensive examples.")
+
+#%%
+# ==============================================================================
+# SECTION 2: COMPREHENSIVE EXAMPLES - Core Features
+# ==============================================================================
+# Cell 5: Advanced plotting with trigonometric functions
+# This cell shows more sophisticated matplotlib usage
+
+print("Creating advanced trigonometric plot...")
+
+# Reuse x from earlier or create new data
+x = np.linspace(0, 2 * np.pi, 100)
+y = np.sin(x)
 
 # Create a matplotlib plot
 plt.figure(figsize=(10, 6))
@@ -36,9 +84,11 @@ plt.grid(True)
 plt.show()
 
 print("Plot displayed in browser! Check your web browser at the URL shown in Neovim.")
+print(f"Created data arrays: x.shape={x.shape}, y.shape={y.shape}")
+print(f"Min/Max values: y_min={y.min():.2f}, y_max={y.max():.2f}")
 
 #%%
-# Cell 4: Data analysis with pandas
+# Cell 6: Data analysis with pandas
 # This shows how Quench handles tabular data display
 
 import pandas as pd
@@ -62,7 +112,7 @@ print(f"Columns: {list(df.columns)}")
 print(f"Average salary: ${df['Salary'].mean():,.2f}")
 
 #%%
-# Cell 5: Interactive data visualization
+# Cell 7: Interactive data visualization with subplots
 # This demonstrates more complex visualizations
 
 # Create multiple subplots
@@ -96,27 +146,8 @@ plt.show()
 print("Multi-plot visualization complete!")
 
 #%%
-# Cell 6: Error handling demonstration
-# This shows how Quench displays errors in both Neovim and browser
-
-print("This cell will demonstrate error handling...")
-
-try:
-    # This will cause a deliberate error
-    result = 10 / 0
-except ZeroDivisionError as e:
-    print(f"Caught error: {e}")
-    print("Error messages appear both in Neovim and in the browser!")
-
-# This will show an uncaught error
-# Uncomment the next line to see error display:
-# undefined_variable + 5
-
-print("Error handling demonstrated!")
-
-#%%
-# Cell 7: Working with different data types and rich output
-# This shows how Quench handles various Python objects
+# Cell 8: Rich output types - HTML, Markdown, and LaTeX
+# This shows how Quench handles various display formats
 
 from IPython.display import HTML, Markdown, Math
 
@@ -135,7 +166,10 @@ html_content = """
 
 print("Displaying HTML content...")
 HTML(html_content)
+
 #%%
+# Cell 9: Markdown and LaTeX support
+# Continued demonstration of rich display capabilities
 
 # Display Markdown
 markdown_content = """
@@ -145,7 +179,7 @@ Quench supports **Markdown** rendering too!
 
 ## Features:
 - *Italic text*
-- **Bold text**  
+- **Bold text**
 - `Code snippets`
 - [Links](https://github.com)
 
@@ -158,24 +192,81 @@ Quench supports **Markdown** rendering too!
 
 print("Displaying Markdown content...")
 Markdown(markdown_content)
+
 #%%
+# Cell 10: LaTeX math and ANSI colors
+# This demonstrates mathematical equations and colored terminal output
+
 # Display LaTeX math
 print("Displaying mathematical equations...")
 Math(r'\int_{-\infty}^{\infty} e^{-x^2} dx = \sqrt{\pi}')
+
 #%%
-# Example ansi escape sequences for colored text
-print("Demonstrating ANSI colored text:")
-print("\033[91mThis is red text\033[0m")
-# carriage return example
+# Cell 11: ANSI escape sequences and progress indicators
+# Shows colored text and carriage return handling
+
 import time
+
+# Example ANSI escape sequences for colored text
+print("\nDemonstrating ANSI colored text:")
+print("\033[91mThis is red text\033[0m")
+
+# Carriage return example with progress indicator
+print("\nProgress indicator demo:")
 print("Progress: 0%", end="")
 for i in range(1, 11):
     time.sleep(0.2)
     print(f"\rProgress: {i*10}%", end="")
 print("\nDone!")
+
 #%%
-# Cell 8: Plugin status and management
-# This shows how to monitor and control Quench
+# Cell 12: Shell command execution
+# This demonstrates IPython's shell command feature using the ! prefix
+# Shell commands are executed directly in the system shell
+
+! echo "This is a shell command executed from within the Python cell."
+! pwd
+! ls -la | head -5
+
+print("\n✅ Shell commands executed successfully!")
+print("💡 Use the ! prefix to run any shell command from your Python cells")
+
+#%%
+# ==============================================================================
+# SECTION 3: GUIDANCE - Advanced Features and Best Practices
+# ==============================================================================
+# Cell 13: Advanced features and system information
+
+import sys
+import os
+from concurrent.futures import ThreadPoolExecutor
+
+print("=== Advanced Quench Features ===")
+
+# Demonstrate long-running task
+def long_running_task(n):
+    """Simulate a long-running computation."""
+    time.sleep(1)
+    return f"Task {n} completed after 1 second"
+
+print("\nRunning multiple tasks (this will take a few seconds)...")
+
+# Execute multiple tasks
+results = []
+for i in range(3):
+    result = long_running_task(i + 1)
+    results.append(result)
+    print(result)
+
+print(f"\nAll tasks completed! Results: {len(results)} items")
+
+# Show system information
+print(f"\nPython version: {sys.version}")
+print(f"Current working directory: {os.getcwd()}")
+print(f"Available modules: numpy, matplotlib, pandas, IPython")
+
+#%%
+# Cell 14: Plugin management and best practices
 
 print("=== Quench Plugin Status ===")
 print("Run these commands in Neovim to manage the plugin:")
@@ -190,11 +281,7 @@ print("• Creates IPython kernel sessions per buffer")
 print("• Relays output to both Neovim and browser")
 print("• Cleans up resources when Neovim exits")
 
-#%%
-# Cell 9: Best practices and tips
-# This provides usage guidance for new users
-
-print("=== Quench Best Practices ===")
+print("\n=== Quench Best Practices ===")
 print("")
 print("1. CELL EXECUTION:")
 print("   • Position cursor anywhere in a cell")
@@ -203,7 +290,7 @@ print("   • Cells are separated by #%% markers")
 print("")
 print("2. BROWSER INTEGRATION:")
 print("   • Web server starts automatically on port 8765")
-print("   • Open http://127.0.0.1:8765?kernel_id=<YOUR_KERNEL_ID>")
+print("   • Open http://127.0.0.1:8765")
 print("   • Rich output (plots, HTML, etc.) appears in browser")
 print("   • Text output appears in Neovim")
 print("")
@@ -217,43 +304,7 @@ print("   • Check :QuenchStatus for plugin state")
 print("   • Error messages appear in both Neovim and browser")
 print("   • Use :QuenchStop to reset if needed")
 
-#%%
-# Cell 10: Advanced features demonstration
-# This shows more sophisticated usage patterns
-
-import time
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
-
-print("=== Advanced Quench Features ===")
-
-# Demonstrate async execution context
-def long_running_task(n):
-    """Simulate a long-running computation."""
-    time.sleep(1)
-    return f"Task {n} completed after 1 second"
-
-print("Running multiple tasks (this will take a few seconds)...")
-
-# Execute multiple tasks
-results = []
-for i in range(3):
-    result = long_running_task(i + 1)
-    results.append(result)
-    print(result)
-
-print(f"All tasks completed! Results: {len(results)} items")
-
-# Show memory usage and performance
-import sys
-print(f"\nPython version: {sys.version}")
-print(f"Current working directory: {os.getcwd()}")
-print(f"Available modules: numpy, matplotlib, pandas, IPython")
-
-#%%
-# Cell 11: Final summary and next steps
-
-print("🎉 Congratulations! You've completed the Quench tutorial!")
+print("\n🎉 Congratulations! You've completed the Quench tutorial!")
 print("")
 print("WHAT YOU'VE LEARNED:")
 print("✓ How to execute Python cells with #%% separators")
