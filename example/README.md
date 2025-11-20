@@ -140,13 +140,38 @@ pip install jupyter-client aiohttp websockets numpy matplotlib pandas
 - Each buffer gets its own kernel session
 - Variables persist between cells in the same buffer
 
+## Testing Kernel Status Indicator
+
+Quench includes a reactive kernel status indicator that shows real-time kernel state. Test it with these scripts:
+
+### Quick Test (5 cells, ~2 minutes)
+```bash
+nvim example/quick-state-test.py
+```
+Tests the main states: Idle, Busy, Error, Dead, Auto-restart
+
+### Comprehensive Test (9 cells, ~5 minutes)
+```bash
+nvim example/test-kernel-states.py
+```
+Complete test suite with detailed explanations of each state transition.
+
+**Status Indicator States:**
+- ⬡ **Grey** (Disconnected) - Not connected to kernel
+- ⬢ **Yellow** (Connecting/Starting) - Kernel launching (pulsing)
+- ⬢ **Blue** (Idle) - Ready for input
+- ⬢ **Green** (Busy) - Executing code (pulsing)
+- **!** **Red** (Error) - Execution failed (with glow, 3s persistence)
+- **✕** **Orange** (Dead) - Kernel crashed
+
 ## Example Workflow
 
 1. **Open Python file** with `#%%` cell markers
 2. **Execute first cell** to start web server and kernel
-3. **Open browser** to see rich output
-4. **Develop iteratively** - execute cells as you write code
-5. **Monitor with** `:QuenchStatus` if needed
+3. **Open browser** to see rich output and status indicator
+4. **Watch status indicator** change as code executes
+5. **Develop iteratively** - execute cells as you write code
+6. **Monitor with** `:QuenchStatus` if needed
 
 ## Tips for Best Experience
 

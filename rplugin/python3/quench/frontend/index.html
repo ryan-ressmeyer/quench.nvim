@@ -98,6 +98,7 @@
             font-weight: bold;
         }
 
+        /* Old connected/disconnected styles - replaced by status-* classes
         #kernel-info-toggle.connected {
             background-color: #28a745;
             border-color: #28a745;
@@ -119,6 +120,7 @@
             background-color: #5d252b;
             border-color: #5d252b;
         }
+        */
 
         .cell {
             position: relative;
@@ -435,6 +437,77 @@
 
         #autoscroll-toggle:active {
             transform: scale(0.95);
+        }
+
+        /* Reactive Kernel Status Indicator Styles */
+        :root {
+            /* Gruvbox/VSCode inspired palette for high contrast on dark bg */
+            --status-grey: #6e7681;
+            --status-yellow: #d19a66;
+            --status-blue: #007acc;
+            --status-green: #28a745;
+            --status-red: #f44336;   /* Bright Red for visibility */
+            --status-orange: #d65d0e;
+        }
+
+        /* Base transition for smooth color changes */
+        #kernel-info-toggle {
+            transition: all 0.3s ease;
+            font-weight: bold;
+        }
+
+        /* Keyframe Animations */
+        @keyframes pulse-fast {
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.95); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+
+        @keyframes pulse-slow {
+            0% { opacity: 0.6; }
+            50% { opacity: 1; }
+            100% { opacity: 0.6; }
+        }
+
+        /* State Classes - Use ID selector for proper specificity */
+        #kernel-info-toggle.status-disconnected {
+            color: var(--status-grey) !important;
+            border-color: var(--status-grey) !important;
+            background-color: transparent !important;
+        }
+
+        #kernel-info-toggle.status-connecting {
+            color: var(--status-yellow) !important;
+            border-color: var(--status-yellow) !important;
+            background-color: transparent !important;
+            animation: pulse-slow 2s infinite;
+        }
+
+        #kernel-info-toggle.status-idle {
+            color: #ffffff !important;
+            background-color: var(--status-blue) !important;
+            border-color: var(--status-blue) !important;
+        }
+
+        #kernel-info-toggle.status-busy {
+            color: #ffffff !important;
+            background-color: var(--status-green) !important;
+            border-color: var(--status-green) !important;
+            /* The requested pulsing hexagon */
+            animation: pulse-fast 1s infinite;
+        }
+
+        #kernel-info-toggle.status-error {
+            color: #ffffff !important;
+            background-color: var(--status-red) !important;
+            border-color: var(--status-red) !important;
+            box-shadow: 0 0 8px var(--status-red); /* Glow effect */
+        }
+
+        #kernel-info-toggle.status-dead {
+            color: #ffffff !important;
+            background-color: var(--status-orange) !important;
+            border-color: var(--status-orange) !important;
         }
     </style>
 </head>

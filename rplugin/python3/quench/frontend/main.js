@@ -18,6 +18,10 @@ class QuenchClient {
         this.isKernelDataLoaded = false; // Track if kernel data is loaded
         this.loadingTimeout = null; // Timeout for loading fallback
 
+        // State machine properties for reactive kernel status
+        this.connectionState = 'disconnected';
+        this.errorTimeout = null; // To manage error flash persistence
+
         this.init();
     }
 
@@ -185,10 +189,10 @@ class QuenchClient {
 
     onKernelSelected() {
         const selectedKernelId = this.kernelSelect.value;
-        
+
         if (!selectedKernelId) {
             this.disconnect();
-            this.updateStatus('Select a kernel to connect...', 'disconnected');
+            this.setKernelState('disconnected');
             this.updateKernelInfoDropdown(null);
             return;
         }
@@ -208,7 +212,7 @@ class QuenchClient {
 
     connect() {
         if (!this.kernelId) {
-            this.updateStatus('No kernel selected', 'disconnected');
+            this.setKernelState('disconnected');
             return;
         }
 
@@ -217,16 +221,16 @@ class QuenchClient {
 
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws/${this.kernelId}`;
-        
+
         console.log(`Connecting to WebSocket: ${wsUrl}`);
-        this.updateStatus('Connecting...', 'disconnected');
-        
+        this.setKernelState('connecting');
+
         try {
             this.ws = new WebSocket(wsUrl);
             this.setupWebSocketHandlers();
         } catch (error) {
             console.error('Failed to create WebSocket connection:', error);
-            this.updateStatus('Failed to connect', 'disconnected');
+            this.setKernelState('disconnected');
         }
     }
 
@@ -247,7 +251,8 @@ class QuenchClient {
     setupWebSocketHandlers() {
         this.ws.onopen = (event) => {
             console.log('WebSocket connection opened');
-            this.updateStatus('Connected to kernel', 'connected');
+            // Start in connecting state - will transition to idle/busy as kernel reports status
+            this.setKernelState('connecting');
         };
 
         this.ws.onmessage = (event) => {
@@ -263,12 +268,12 @@ class QuenchClient {
 
         this.ws.onclose = (event) => {
             console.log('WebSocket connection closed:', event.code, event.reason);
-            this.updateStatus('Connection closed', 'disconnected');
+            this.setKernelState('disconnected');
         };
 
         this.ws.onerror = (event) => {
             console.error('WebSocket error:', event);
-            this.updateStatus('Connection error', 'disconnected');
+            this.setKernelState('disconnected');
         };
     }
 
@@ -493,7 +498,7 @@ class QuenchClient {
             console.warn('Error message without parent_header.msg_id:', message);
             return;
         }
-        
+
         // Create a cell on-demand if one doesn't exist for this parent message ID
         if (!this.cells.has(parentMsgId)) {
             console.log(`Creating on-demand cell for orphaned error message: ${parentMsgId.slice(0,8)}`);
@@ -507,28 +512,41 @@ class QuenchClient {
                 sidebar.className = 'cell-sidebar status-completed-error';
             }
         }
-        
+
         const cell = this.cells.get(parentMsgId);
         const outputDiv = cell.querySelector('.cell-output');
-        
+
         const errorDiv = document.createElement('div');
         errorDiv.className = 'output-item output-error';
-        
+
         const errorName = message.content?.ename || 'Error';
         const errorValue = message.content?.evalue || '';
         const traceback = message.content?.traceback || [];
-        
+
         // Clean up ANSI escape codes from traceback
         const cleanTraceback = traceback.map(line => this.ansiUp.ansi_to_html(line));
         const errorText = `${errorName}: ${errorValue}\n${cleanTraceback.join('\n')}`;
-        
+
         const errorPre = document.createElement('pre');
         errorPre.className = 'output-text';
         errorPre.innerHTML = errorText;
         errorDiv.appendChild(errorPre);
-        
+
         outputDiv.appendChild(errorDiv);
-        
+
+        // Update kernel state to error with persistence logic
+        this.setKernelState('error');
+
+        // Set a timeout to automatically transition back to idle after 3 seconds
+        // This ensures the error indicator is visible long enough for the user to notice
+        this.errorTimeout = setTimeout(() => {
+            // Only transition to idle if we're still in error state
+            // (user might have triggered another action in the meantime)
+            if (this.connectionState === 'error') {
+                this.setKernelState('idle');
+            }
+        }, 3000); // 3 second persistence
+
         // Auto-scroll to bottom if enabled
         this.autoscroll();
     }
@@ -537,7 +555,32 @@ class QuenchClient {
         const executionState = message.content?.execution_state;
         if (executionState) {
             console.log(`Kernel execution state: ${executionState}`);
-            // Could update UI to show kernel busy/idle state
+
+            // Guard clause: If kernel is dead, ignore status messages (zombie prevention)
+            if (this.connectionState === 'dead') {
+                console.log('Ignoring status message - kernel is dead');
+                return;
+            }
+
+            // Guard clause: If we're in error state, ignore idle messages briefly
+            // This prevents the error indicator from being cleared too quickly
+            if (this.connectionState === 'error' && executionState === 'idle') {
+                console.log('Ignoring idle message - still showing error');
+                return;
+            }
+
+            // Map execution states to our state machine states
+            switch (executionState) {
+                case 'starting':
+                    this.setKernelState('connecting');
+                    break;
+                case 'busy':
+                    this.setKernelState('busy');
+                    break;
+                case 'idle':
+                    this.setKernelState('idle');
+                    break;
+            }
         }
     }
 
@@ -606,6 +649,9 @@ class QuenchClient {
         // Add to the output area
         this.outputArea.appendChild(notificationDiv);
 
+        // Reset kernel state to idle (clears dead/error states)
+        this.setKernelState('idle');
+
         // Auto-scroll to bottom if enabled
         this.autoscroll();
     }
@@ -644,6 +690,9 @@ class QuenchClient {
         // Add to the output area
         this.outputArea.appendChild(notificationDiv);
 
+        // Reset kernel state to idle (clears dead/error states)
+        this.setKernelState('idle');
+
         this.autoscroll();
     }
 
@@ -680,8 +729,8 @@ class QuenchClient {
 
         this.outputArea.appendChild(notificationDiv);
 
-        // 2. Update Status UI
-        this.updateStatus('Kernel Died', 'disconnected');
+        // 2. Update kernel state to dead (sticky state)
+        this.setKernelState('dead');
 
         this.autoscroll();
     }
@@ -892,6 +941,75 @@ class QuenchClient {
         if (connectionStatusElement) {
             connectionStatusElement.textContent = message;
         }
+    }
+
+    setKernelState(state) {
+        /**
+         * Centralized state management for the kernel status indicator.
+         * Updates the icon, CSS classes, and connectionState based on the provided state.
+         *
+         * @param {string} state - One of: 'disconnected', 'connecting', 'idle', 'busy', 'error', 'dead'
+         */
+
+        // Clear any existing error timeout
+        if (this.errorTimeout) {
+            clearTimeout(this.errorTimeout);
+            this.errorTimeout = null;
+        }
+
+        // Remove all status-* classes and old connected/disconnected classes from the button
+        this.kernelInfoToggle.className = this.kernelInfoToggle.className
+            .split(' ')
+            .filter(cls => !cls.startsWith('status-') && cls !== 'connected' && cls !== 'disconnected')
+            .join(' ');
+
+        // Set the new state
+        this.connectionState = state;
+
+        // Apply state-specific styling and icon
+        let icon = '⬡'; // Default hollow hexagon
+        let statusClass = `status-${state}`;
+
+        switch (state) {
+            case 'disconnected':
+                icon = '⬡'; // Hollow hexagon
+                break;
+            case 'connecting':
+                icon = '⬢'; // Filled hexagon (will pulse yellow)
+                break;
+            case 'idle':
+                icon = '⬢'; // Filled hexagon (blue)
+                break;
+            case 'busy':
+                icon = '⬢'; // Filled hexagon (green, pulsing)
+                break;
+            case 'error':
+                icon = '!'; // Exclamation mark
+                break;
+            case 'dead':
+                icon = '✕'; // X mark
+                break;
+        }
+
+        // Update the button
+        this.kernelInfoToggle.textContent = icon;
+        this.kernelInfoToggle.classList.add(statusClass);
+
+        // Update the connection status in the dropdown
+        const connectionStatusElement = document.getElementById('info-connection-status');
+        if (connectionStatusElement) {
+            const statusMessages = {
+                'disconnected': 'Disconnected',
+                'connecting': 'Connecting...',
+                'idle': 'Idle - Ready',
+                'busy': 'Busy - Running',
+                'error': 'Error',
+                'dead': 'Kernel Died'
+            };
+            connectionStatusElement.textContent = statusMessages[state] || state;
+        }
+
+        console.log(`Kernel state changed to: ${state}`);
     }
 
     updateAutoscrollButton() {

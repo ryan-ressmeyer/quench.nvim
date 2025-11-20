@@ -89,6 +89,28 @@ class KernelSession:
             self.client = self.km.client()
             self.client.start_channels()  # This is synchronous
 
+            # Broadcast 'starting' status immediately to frontend
+            # This provides immediate visual feedback that the kernel is launching
+            from datetime import datetime, timezone
+            starting_msg = {
+                'header': {
+                    'msg_id': f"starting_{self.kernel_id}_{datetime.now(timezone.utc).isoformat()}",
+                    'msg_type': 'status',
+                    'username': 'quench',
+                    'session': self.kernel_id,
+                    'date': datetime.now(timezone.utc),
+                    'version': '5.3'
+                },
+                'msg_type': 'status',
+                'content': {
+                    'execution_state': 'starting'
+                },
+                'metadata': {},
+                'buffers': []
+            }
+            await self.relay_queue.put((self.kernel_id, starting_msg))
+            self._logger.debug(f"Broadcast 'starting' status for kernel {self.kernel_id[:8]}")
+
             # Wait for the client to be fully ready (this IS async)
             await self.client.wait_for_ready(timeout=30)
 
