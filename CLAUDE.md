@@ -73,6 +73,41 @@ This is a fully implemented and production-ready plugin with comprehensive testi
 - Central message queue (asyncio.Queue) for component communication
 - Cell-based execution using `#%%` delimiters in Python files
 - Web browser integration for rich media (plots, audio, etc.)
+- Automatic kernel death detection and recovery for robust execution
+
+### Kernel Lifecycle Management
+
+The plugin implements three distinct kernel restart/recovery mechanisms:
+
+1. **Manual Restart** (`restart()` method in `kernel_session.py`)
+   - Triggered by: User via `QuenchResetKernel` command
+   - Behavior: Restarts the kernel process using `km.restart_kernel()`
+   - Message sent: `kernel_restarted`
+   - Output cache: Preserved (outputs remain visible)
+   - Use case: User wants to clear kernel namespace while keeping outputs
+
+2. **Death Detection** (`_monitor_process()` method in `kernel_session.py`)
+   - Triggered by: Background monitoring loop (checks every 2 seconds)
+   - Detection: Kernel process dies unexpectedly (OOM, crash, external SIGKILL)
+   - Behavior: Sets `is_dead` flag, sends `kernel_died` message, cleans up resources
+   - Message sent: `kernel_died`
+   - Use case: Kernel crashes or is terminated by OS
+
+3. **Auto-Restart on Execution** (`execute()` method in `kernel_session.py`)
+   - Triggered by: Attempting to execute code when `is_dead == True`
+   - Behavior: Automatically calls `start()` to restart kernel, clears `is_dead` flag, proceeds with execution
+   - Message sent: `kernel_auto_restarted`
+   - Output cache: Preserved (previous outputs remain visible)
+   - Use case: Seamless recovery from kernel death without user intervention
+
+**Complete Death-to-Recovery Flow:**
+1. Kernel process dies (OOM, crash, SIGKILL)
+2. Monitoring loop detects death within ~2 seconds
+3. `is_dead` flag set to `True`, user notified
+4. User runs next cell
+5. Plugin automatically restarts kernel
+6. Cell executes successfully on restarted kernel
+7. Previous outputs remain visible in frontend
 
 ### Modular Architecture
 The plugin is organized into distinct modules for maintainability:
@@ -119,6 +154,7 @@ tests/
 └── e2e/                 # End-to-end integration tests
     ├── test_neovim_instance.py        # Neovim integration tests
     ├── test_quench_interrupt_kernel.py # Kernel interrupt tests
+    ├── test_quench_kernel_death.py    # Kernel death detection and auto-restart tests
     ├── test_quench_kernel_start.py    # Kernel start tests
     ├── test_quench_reset_kernel.py    # Kernel reset tests
     ├── test_quench_run_cell.py        # Cell execution tests
@@ -137,9 +173,13 @@ lua/quench/init.lua      # Basic Lua module setup
 
 ## Testing Strategy
 
-**136 tests implemented** with comprehensive coverage:
+**138 tests implemented** with comprehensive coverage:
 - **Unit tests** (`tests/unit/`) - Component-level testing
-  - `test_kernel_session.py` - Kernel session management tests
+  - `test_kernel_session.py` - Kernel session management tests (35 tests)
+    - Manual restart testing
+    - Death detection testing via monitoring loop
+    - Auto-restart on execution testing
+    - Complete death-to-recovery flow coverage
   - `test_quench_plugin.py` - Main plugin class tests
   - `test_ui_manager.py` - UI manager functionality tests
   - `test_web_server.py` - Web server tests
@@ -150,6 +190,7 @@ lua/quench/init.lua      # Basic Lua module setup
   - `test_quench_reset_kernel.py` - Kernel reset tests
   - `test_quench_run_cell.py` - Cell execution tests
   - `test_quench_stop.py` - Plugin shutdown tests
+  - `test_quench_kernel_death.py` - Kernel death detection and auto-restart integration tests
 - **Test configuration** (`tests/conftest.py`) - Shared fixtures and dependency detection
 - **Dependency detection** - Tests auto-skip when optional dependencies missing
 - **Async support** - Full pytest-asyncio integration for testing async functionality

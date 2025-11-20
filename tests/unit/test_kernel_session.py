@@ -243,8 +243,12 @@ class TestKernelSession:
             await session.interrupt()
     
     @pytest.mark.asyncio
-    async def test_kernel_session_restart_success(self):
-        """Test successful kernel restart."""
+    async def test_kernel_session_manual_restart_success(self):
+        """Test successful manual kernel restart via restart() method.
+
+        This tests user-initiated restart (QuenchResetKernel command),
+        which is different from auto-restart after kernel death.
+        """
         session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
         
         # Mock kernel manager
@@ -259,9 +263,10 @@ class TestKernelSession:
         
         # Verify restart_kernel was called
         mock_km.restart_kernel.assert_called_once()
-        
-        # Verify output cache was cleared
-        assert len(session.output_cache) == 0
+
+        # Verify output cache was preserved (not cleared)
+        assert len(session.output_cache) == 2
+        assert session.output_cache == ["item1", "item2"]
         
         # Verify kernel_restarted message was queued
         assert not self.relay_queue.empty()
@@ -282,14 +287,121 @@ class TestKernelSession:
     async def test_kernel_session_restart_error_handling(self):
         """Test restart method error handling."""
         session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
-        
+
         mock_km = AsyncMock()
         mock_km.restart_kernel = AsyncMock(side_effect=Exception("Restart failed"))
         session.km = mock_km
-        
+
         with pytest.raises(Exception, match="Restart failed"):
             await session.restart()
-    
+
+    @pytest.mark.asyncio
+    async def test_kernel_session_death_detection(self):
+        """Test kernel death detection via monitoring loop."""
+        session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
+
+        # Mock kernel manager that reports as dead
+        mock_km = AsyncMock()
+        mock_client = AsyncMock()
+
+        # First check returns True (alive), second returns False (dead)
+        # This simulates kernel dying during monitoring
+        mock_km.is_alive = AsyncMock(side_effect=[True, False])
+
+        session.km = mock_km
+        session.client = mock_client
+
+        # Verify kernel starts as alive
+        assert session.is_dead == False
+
+        # Start the monitoring task
+        monitor_task = asyncio.create_task(session._monitor_process())
+
+        # Wait for monitoring loop to detect death
+        # The loop checks every 2 seconds, so we need to wait a bit
+        await asyncio.sleep(2.5)
+
+        # Cancel the monitoring task
+        monitor_task.cancel()
+        try:
+            await monitor_task
+        except asyncio.CancelledError:
+            pass
+
+        # Verify death was detected
+        assert session.is_dead == True
+
+        # Verify kernel_died message was sent to relay queue
+        assert not self.relay_queue.empty()
+        kernel_id, message = await self.relay_queue.get()
+        assert kernel_id == session.kernel_id
+        assert message["msg_type"] == "kernel_died"
+        assert message["content"]["status"] == "dead"
+        assert "crashed" in message["content"]["reason"].lower() or "terminated" in message["content"]["reason"].lower()
+
+        # Verify client and manager references are cleaned up
+        assert session.client is None
+        assert session.km is None
+
+    @pytest.mark.asyncio
+    async def test_kernel_session_auto_restart_on_execute(self):
+        """Test auto-restart mechanism when executing code after kernel death."""
+        session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
+
+        # Simulate a dead kernel
+        session.is_dead = True
+
+        # Mock the start method to simulate successful restart
+        original_start = session.start
+        start_called = False
+
+        async def mock_start(kernel_name=None):
+            nonlocal start_called
+            start_called = True
+            # Set up minimal mocks to simulate successful start
+            session.km = AsyncMock()
+            session.client = AsyncMock()
+            session.client.execute = Mock(return_value="msg-id-auto-restart")
+            session.listener_task = AsyncMock()
+            session.monitor_task = AsyncMock()
+            # Clear the is_dead flag as start() does
+            session.is_dead = False
+
+        # Patch the start method
+        with patch.object(session, 'start', new=mock_start):
+            # Execute code
+            code = "print('Testing auto-restart')"
+            await session.execute(code)
+
+            # Verify start() was called (auto-restart triggered)
+            assert start_called == True
+
+        # Verify is_dead flag was cleared
+        assert session.is_dead == False
+
+        # Verify messages were sent in correct order:
+        # 1. execute_input
+        # 2. quench_cell_status (queued)
+        # 3. quench_cell_status (running)
+        # 4. kernel_auto_restarted
+        messages = []
+        while not self.relay_queue.empty():
+            messages.append(await self.relay_queue.get())
+
+        # Find the kernel_auto_restarted message
+        auto_restart_msg = None
+        for kernel_id, msg in messages:
+            if msg["msg_type"] == "kernel_auto_restarted":
+                auto_restart_msg = msg
+                break
+
+        assert auto_restart_msg is not None, "kernel_auto_restarted message not found"
+        assert auto_restart_msg["content"]["status"] == "ok"
+        assert "auto-restart" in auto_restart_msg["content"]["reason"].lower()
+
+        # Verify execute was called on the client after restart
+        assert session.client.execute.called
+
     @pytest.mark.asyncio
     async def test_kernel_session_shutdown_success(self):
         """Test successful kernel shutdown."""

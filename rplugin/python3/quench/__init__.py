@@ -366,9 +366,50 @@ class Quench:
                     preview = code_lines[0]
                     if len(code_lines) > 1:
                         preview += f" ... ({len(code_lines)} lines)"
-                    
+
                     self._logger.info(f"[{kernel_id[:8]}] Executing: {preview}")
-                    
+
+            elif msg_type == 'kernel_died':
+                # Handle kernel death notification
+                reason = content.get('reason', 'Unknown reason')
+                self._logger.error(f"[{kernel_id[:8]}] Kernel died: {reason}")
+
+                # Notify user in Neovim
+                def notify_kernel_death():
+                    notify_user(self.nvim, f"Kernel {kernel_id[:8]} died. It will auto-restart on next execution.", level='error')
+
+                try:
+                    self.nvim.async_call(notify_kernel_death)
+                except:
+                    pass
+
+            elif msg_type == 'kernel_auto_restarted':
+                # Handle kernel auto-restart notification
+                reason = content.get('reason', 'Auto-restart after death')
+                self._logger.info(f"[{kernel_id[:8]}] {reason}")
+
+                # Notify user in Neovim
+                def notify_kernel_auto_restart():
+                    notify_user(self.nvim, f"Kernel {kernel_id[:8]} auto-restarted after death")
+
+                try:
+                    self.nvim.async_call(notify_kernel_auto_restart)
+                except:
+                    pass
+
+            elif msg_type == 'kernel_restarted':
+                # Handle kernel restart notification (manual restart)
+                self._logger.info(f"[{kernel_id[:8]}] Kernel restarted manually")
+
+                # Notify user in Neovim
+                def notify_kernel_restart():
+                    notify_user(self.nvim, f"Kernel {kernel_id[:8]} restarted - namespace cleared")
+
+                try:
+                    self.nvim.async_call(notify_kernel_restart)
+                except:
+                    pass
+
         except Exception as e:
             error_msg = str(e) if e else "Unknown error"
             self._logger.warning(f"Error handling message for Neovim: {error_msg}")

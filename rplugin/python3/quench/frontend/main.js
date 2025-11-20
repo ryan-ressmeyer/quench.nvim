@@ -292,7 +292,15 @@ class QuenchClient {
             case 'kernel_restarted':
                 this.handleKernelRestarted(message);
                 break;
-                
+
+            case 'kernel_auto_restarted':
+                this.handleKernelAutoRestarted(message);
+                break;
+
+            case 'kernel_died':
+                this.handleKernelDied(message);
+                break;
+
             case 'quench_cell_status':
                 this.handleCellStatus(message);
                 break;
@@ -560,36 +568,114 @@ class QuenchClient {
 
     handleKernelRestarted(message) {
         console.log('Kernel restarted message received:', message);
-        
+
         // Create a prominent notification cell
         const notificationDiv = document.createElement('div');
         notificationDiv.className = 'cell kernel-restart-notification';
-        
+
         const notificationContent = document.createElement('div');
         notificationContent.className = 'notification-content';
-        
+
         const notificationIcon = document.createElement('div');
         notificationIcon.className = 'notification-icon';
         notificationIcon.textContent = '🔄';
-        
+
         const notificationText = document.createElement('div');
         notificationText.className = 'notification-text';
         notificationText.innerHTML = '<strong>Kernel Restarted</strong><br>All variables and imported modules have been reset.';
-        
+
         const notificationTimestamp = document.createElement('div');
         notificationTimestamp.className = 'notification-timestamp';
         notificationTimestamp.textContent = new Date().toLocaleTimeString();
-        
+
         notificationContent.appendChild(notificationIcon);
         notificationContent.appendChild(notificationText);
         notificationContent.appendChild(notificationTimestamp);
         notificationDiv.appendChild(notificationContent);
-        
+
         // Add to the output area
         this.outputArea.appendChild(notificationDiv);
         this.activeCellElement = notificationDiv;
-        
+
         // Auto-scroll to bottom if enabled
+        this.autoscroll();
+    }
+
+    handleKernelAutoRestarted(message) {
+        console.log('Kernel auto-restarted message received:', message);
+
+        // Create a prominent notification cell with warning/info styling
+        const notificationDiv = document.createElement('div');
+        notificationDiv.className = 'cell kernel-restart-notification';
+        // Add specific auto-restart styling (yellow/warning)
+        notificationDiv.style.borderLeftColor = '#ffc107'; // Yellow
+        notificationDiv.style.backgroundColor = '#1a1508'; // Dark yellow/amber background
+
+        const notificationContent = document.createElement('div');
+        notificationContent.className = 'notification-content';
+
+        const notificationIcon = document.createElement('div');
+        notificationIcon.className = 'notification-icon';
+        notificationIcon.textContent = '🔄'; // Restart symbol
+        notificationIcon.style.color = '#ffc107';
+
+        const notificationText = document.createElement('div');
+        notificationText.className = 'notification-text';
+        notificationText.innerHTML = '<strong>Kernel Auto-Restarted</strong><br>Kernel died and was automatically restarted.';
+
+        const notificationTimestamp = document.createElement('div');
+        notificationTimestamp.className = 'notification-timestamp';
+        notificationTimestamp.textContent = new Date().toLocaleTimeString();
+
+        notificationContent.appendChild(notificationIcon);
+        notificationContent.appendChild(notificationText);
+        notificationContent.appendChild(notificationTimestamp);
+        notificationDiv.appendChild(notificationContent);
+
+        // Add to the output area
+        this.outputArea.appendChild(notificationDiv);
+        this.activeCellElement = notificationDiv;
+
+        this.autoscroll();
+    }
+
+    handleKernelDied(message) {
+        console.log('Kernel died message received:', message);
+
+        // 1. Create Notification Cell
+        const notificationDiv = document.createElement('div');
+        notificationDiv.className = 'cell kernel-restart-notification';
+        // Add specific error styling
+        notificationDiv.style.borderLeftColor = '#dc3545'; // Red
+        notificationDiv.style.backgroundColor = '#2c0b0e'; // Dark red background
+
+        const content = document.createElement('div');
+        content.className = 'notification-content';
+
+        const icon = document.createElement('div');
+        icon.className = 'notification-icon';
+        icon.textContent = '💀'; // Skull icon
+        icon.style.color = '#dc3545';
+
+        const text = document.createElement('div');
+        text.className = 'notification-text';
+        text.innerHTML = `<strong>Kernel Died</strong><br>${message.content?.reason || 'The process was terminated.'}`;
+
+        const timestamp = document.createElement('div');
+        timestamp.className = 'notification-timestamp';
+        timestamp.textContent = new Date().toLocaleTimeString();
+
+        content.appendChild(icon);
+        content.appendChild(text);
+        content.appendChild(timestamp);
+        notificationDiv.appendChild(content);
+
+        this.outputArea.appendChild(notificationDiv);
+        this.activeCellElement = notificationDiv;
+
+        // 2. Update Status UI
+        this.updateStatus('Kernel Died', 'disconnected');
+
         this.autoscroll();
     }
 

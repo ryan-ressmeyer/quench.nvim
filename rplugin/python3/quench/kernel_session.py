@@ -37,6 +37,7 @@ class KernelSession:
         self.relay_queue: asyncio.Queue = relay_queue
         self.associated_buffers: Set[int] = set()
         self.listener_task: Optional[asyncio.Task] = None
+        self.monitor_task: Optional[asyncio.Task] = None
         self.buffer_name = buffer_name or f"kernel_{self.kernel_id[:8]}"
         self.kernel_name = kernel_name or 'python3'
         self.python_executable = sys.executable
@@ -47,10 +48,13 @@ class KernelSession:
         self.is_busy = False
         self.pending_executions: Dict[str, str] = {}  # msg_id -> status
 
+        # Track kernel death state for auto-restart functionality
+        self.is_dead = False
+
     async def start(self, kernel_name: str = None):
         """
         Start the kernel and establish communication channels.
-        
+
         Args:
             kernel_name: Optional kernel name to override the instance default
         """
@@ -59,9 +63,24 @@ class KernelSession:
             raise RuntimeError("jupyter_client is not installed or imports failed. Please install it to use kernel functionality.")
 
         try:
+            # Cancel any existing tasks before restarting (important for auto-restart after death)
+            if self.listener_task and not self.listener_task.done():
+                self.listener_task.cancel()
+                try:
+                    await asyncio.wait_for(self.listener_task, timeout=1.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+
+            if self.monitor_task and not self.monitor_task.done():
+                self.monitor_task.cancel()
+                try:
+                    await asyncio.wait_for(self.monitor_task, timeout=1.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+
             # Use provided kernel_name or fall back to instance default
             effective_kernel_name = kernel_name or self.kernel_name
-            
+
             # Create and start the kernel manager
             self.km = AsyncKernelManager(kernel_name=effective_kernel_name)
             await self.km.start_kernel()  # This IS async in jupyter_client 8.x
@@ -75,7 +94,10 @@ class KernelSession:
 
             # Start the IOPub listener task
             self.listener_task = asyncio.create_task(self._listen_iopub())
-            
+
+            # Start the process monitoring task
+            self.monitor_task = asyncio.create_task(self._monitor_process())
+
             self._logger.info(f"Kernel {self.kernel_id[:8]} (type: {effective_kernel_name}) started successfully")
 
         except Exception as e:
@@ -110,10 +132,21 @@ class KernelSession:
             except Exception as e:
                 self._logger.warning(f"Listener task for {self.kernel_id[:8]} had an error on cleanup: {e}")
 
-        # 3. Clean up references.
+        # 3. Cancel the monitor task.
+        if self.monitor_task and not self.monitor_task.done():
+            self.monitor_task.cancel()
+            try:
+                await asyncio.wait_for(self.monitor_task, timeout=1.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+            except Exception as e:
+                self._logger.warning(f"Monitor task for {self.kernel_id[:8]} had an error on cleanup: {e}")
+
+        # 4. Clean up references.
         self.client = None
         self.km = None
         self.listener_task = None
+        self.monitor_task = None
 
 
     async def _send_cell_status(self, msg_id: str, status: str):
@@ -158,12 +191,57 @@ class KernelSession:
     async def execute(self, code: str):
         """
         Send code to the kernel's shell channel for execution.
+        If the kernel has died, automatically restart it before executing.
 
         Args:
             code: The Python code to execute
         """
+        # Auto-restart kernel if it has died
+        if self.is_dead:
+            self._logger.info(f"Kernel {self.kernel_id[:8]} is dead, auto-restarting before execution")
+
+            try:
+                # Restart the kernel
+                await self.start(self.kernel_name)
+
+                # Mark kernel as no longer dead
+                self.is_dead = False
+
+                # Send notification to frontend and Neovim
+                from datetime import datetime, timezone
+                auto_restart_msg = {
+                    'header': {
+                        'msg_id': f"auto_restart_{self.kernel_id}_{datetime.now(timezone.utc).isoformat()}",
+                        'msg_type': 'kernel_auto_restarted',
+                        'username': 'quench',
+                        'session': self.kernel_id,
+                        'date': datetime.now(timezone.utc),
+                        'version': '5.3'
+                    },
+                    'msg_type': 'kernel_auto_restarted',
+                    'content': {
+                        'status': 'ok',
+                        'reason': 'Auto-restarted after kernel death'
+                    },
+                    'metadata': {},
+                    'buffers': []
+                }
+
+                # Add to cache and relay
+                self.output_cache.append(auto_restart_msg)
+                await self.relay_queue.put((self.kernel_id, auto_restart_msg))
+
+                self._logger.info(f"Kernel {self.kernel_id[:8]} auto-restarted successfully")
+            except Exception as e:
+                self._logger.error(f"Failed to auto-restart kernel {self.kernel_id[:8]}: {e}")
+                raise RuntimeError(f"Failed to auto-restart kernel: {e}")
+
         if not self.client:
             raise RuntimeError("Kernel client is not available. Call start() first.")
+
+        # Check if kernel is still alive before executing
+        if self.km and not await self.km.is_alive():
+            raise RuntimeError(f"Kernel {self.kernel_id[:8]} process has died. Cannot execute code.")
 
         try:
             # First, get the msg_id that will be generated
@@ -253,10 +331,10 @@ class KernelSession:
             
             # Restart the kernel
             await self.km.restart_kernel()
-            
-            # Clear the output cache to remove previous state
-            self.output_cache.clear()
-            
+
+            # Note: We preserve the output cache to maintain execution history
+            # Users can still see previous outputs even after restart
+
             # Create a custom message for the frontend
             from datetime import datetime, timezone
             restart_message = {
@@ -364,6 +442,53 @@ class KernelSession:
             self._logger.error(f"IOPub listener failed for kernel {self.kernel_id[:8]}: {e}")
         finally:
             self._logger.info(f"IOPub listener stopped for kernel {self.kernel_id[:8]}")
+
+    async def _monitor_process(self):
+        """
+        Periodically check if the kernel process is still alive.
+        If the process dies unexpectedly, notify the frontend and clean up resources.
+        """
+        try:
+            while True:
+                if self.km and not await self.km.is_alive():
+                    self._logger.warning(f"Kernel {self.kernel_id[:8]} process died unexpectedly.")
+
+                    # Mark kernel as dead for auto-restart functionality
+                    self.is_dead = True
+
+                    # Notify Frontend
+                    from datetime import datetime, timezone
+                    death_msg = {
+                        'header': {
+                            'msg_id': f"death_{self.kernel_id}",
+                            'msg_type': 'kernel_died',
+                            'date': datetime.now(timezone.utc),
+                            'version': '5.3'
+                        },
+                        'msg_type': 'kernel_died',
+                        'content': {
+                            'reason': 'Process crashed or was terminated by OS',
+                            'status': 'dead'
+                        }
+                    }
+                    await self.relay_queue.put((self.kernel_id, death_msg))
+
+                    # Clean up the client and kernel manager references
+                    # Don't call shutdown() as it would try to cancel this task from within itself
+                    try:
+                        if self.client:
+                            self.client.stop_channels()
+                            self.client = None
+                        self.km = None
+                    except Exception as e:
+                        self._logger.error(f"Error during cleanup of dead kernel: {e}")
+
+                    break  # Stop monitoring
+
+                await asyncio.sleep(2.0)  # Check every 2 seconds
+
+        except asyncio.CancelledError:
+            pass
 
 
 class KernelSessionManager:
