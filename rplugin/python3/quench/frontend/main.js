@@ -13,8 +13,8 @@ class QuenchClient {
         this.ansiUp = new AnsiUp(); // ANSI code converter
         this.autoscrollButton = null; // Reference to autoscroll toggle button
         this.isAutoscrollEnabled = true; // Track autoscroll state
-        this.activeCellElement = null;     // Tracks the most recently updated cell
-        this.isProgrammaticScroll = false; // Differentiates script vs. user scrolls
+        this.scrollThreshold = 100; // Pixels from bottom to consider "at bottom"
+        this.scrollDebounceTimer = null; // Timer for scroll debouncing
         this.isKernelDataLoaded = false; // Track if kernel data is loaded
         this.loadingTimeout = null; // Timeout for loading fallback
 
@@ -59,20 +59,34 @@ class QuenchClient {
     }
 
     setupScrollHandling() {
-        // This event fires only when a user-initiated scroll has finished.
-        window.addEventListener('scrollend', () => {
-            // If the scroll was initiated by our script, we reset the flag and do nothing.
-            if (this.isProgrammaticScroll) {
-                this.isProgrammaticScroll = false;
-                return;
+        // Listen to scroll events to detect when user scrolls away from bottom
+        window.addEventListener('scroll', () => {
+            // Clear any existing debounce timer
+            if (this.scrollDebounceTimer) {
+                clearTimeout(this.scrollDebounceTimer);
             }
 
-            // If the scroll was initiated by the user, disable autoscroll.
-            if (this.isAutoscrollEnabled) {
-                this.isAutoscrollEnabled = false;
-                this.updateAutoscrollButton();
-            }
-        });
+            // Set debounce timer (wait for scrolling to stop)
+            this.scrollDebounceTimer = setTimeout(() => {
+                this.checkScrollPosition();
+            }, 150); // 150ms debounce
+        }, { passive: true });
+    }
+
+    checkScrollPosition() {
+        // Calculate if we're at the bottom
+        const scrollHeight = document.documentElement.scrollHeight;
+        const scrollTop = window.scrollY || document.documentElement.scrollTop;
+        const clientHeight = window.innerHeight;
+        const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+
+        const isAtBottom = distanceFromBottom <= this.scrollThreshold;
+
+        // If autoscroll is enabled and we're not at bottom, user scrolled away
+        if (this.isAutoscrollEnabled && !isAtBottom) {
+            this.isAutoscrollEnabled = false;
+            this.updateAutoscrollButton();
+        }
     }
 
     handleDropdownClick(e) {
@@ -328,12 +342,11 @@ class QuenchClient {
             console.log(`Creating cell with ID: ${parentMsgId.slice(0,8)}`);
             const cellElement = this.createCell(parentMsgId, code);
             this.cells.set(parentMsgId, cellElement);
-            
+
             console.log(`Cell created, total cells: ${this.cells.size}`);
-            
+
             // Add to the output area
             this.outputArea.appendChild(cellElement);
-            this.activeCellElement = cellElement;
         } else {
             console.warn('Execute input message without parent_header.msg_id:', message);
         }
@@ -351,7 +364,6 @@ class QuenchClient {
             const cellElement = this.createCell(parentMsgId, '# Code executed previously');
             this.cells.set(parentMsgId, cellElement);
             this.outputArea.appendChild(cellElement);
-            this.activeCellElement = cellElement;
 
             // Set the sidebar to running state since we're getting output
             const sidebar = cellElement.querySelector('.cell-sidebar');
@@ -454,8 +466,7 @@ class QuenchClient {
             const cellElement = this.createCell(parentMsgId, '# Code executed previously');
             this.cells.set(parentMsgId, cellElement);
             this.outputArea.appendChild(cellElement);
-            this.activeCellElement = cellElement;
-            
+
             // Set the sidebar to running state since we're getting output
             const sidebar = cellElement.querySelector('.cell-sidebar');
             if (sidebar) {
@@ -489,8 +500,7 @@ class QuenchClient {
             const cellElement = this.createCell(parentMsgId, '# Code executed previously');
             this.cells.set(parentMsgId, cellElement);
             this.outputArea.appendChild(cellElement);
-            this.activeCellElement = cellElement;
-            
+
             // Set the sidebar to error state since this is an error message
             const sidebar = cellElement.querySelector('.cell-sidebar');
             if (sidebar) {
@@ -595,7 +605,6 @@ class QuenchClient {
 
         // Add to the output area
         this.outputArea.appendChild(notificationDiv);
-        this.activeCellElement = notificationDiv;
 
         // Auto-scroll to bottom if enabled
         this.autoscroll();
@@ -634,7 +643,6 @@ class QuenchClient {
 
         // Add to the output area
         this.outputArea.appendChild(notificationDiv);
-        this.activeCellElement = notificationDiv;
 
         this.autoscroll();
     }
@@ -671,7 +679,6 @@ class QuenchClient {
         notificationDiv.appendChild(content);
 
         this.outputArea.appendChild(notificationDiv);
-        this.activeCellElement = notificationDiv;
 
         // 2. Update Status UI
         this.updateStatus('Kernel Died', 'disconnected');
@@ -889,11 +896,13 @@ class QuenchClient {
 
     updateAutoscrollButton() {
         if (this.isAutoscrollEnabled) {
-            this.autoscrollButton.textContent = 'Autoscroll On';
-            this.autoscrollButton.className = 'autoscroll-on';
+            // Hide the button when autoscroll is ON
+            this.autoscrollButton.style.display = 'none';
         } else {
-            this.autoscrollButton.textContent = 'Autoscroll Off';
-            this.autoscrollButton.className = 'autoscroll-off';
+            // Show the button when autoscroll is OFF
+            this.autoscrollButton.style.display = 'flex';
+            this.autoscrollButton.innerHTML = '⌄'; // Downward wedge
+            this.autoscrollButton.title = 'Scroll to bottom and enable autoscroll';
         }
     }
 
@@ -901,17 +910,22 @@ class QuenchClient {
         this.isAutoscrollEnabled = !this.isAutoscrollEnabled;
         this.updateAutoscrollButton();
 
-        // If the user just turned it on, scroll to the latest content.
+        // If the user just turned it on, scroll to bottom immediately
         if (this.isAutoscrollEnabled) {
-            this.autoscroll();
+            window.scrollTo({
+                top: document.documentElement.scrollHeight,
+                behavior: 'smooth'
+            });
         }
     }
 
     autoscroll() {
-        if (this.isAutoscrollEnabled && this.activeCellElement) {
-            // Set a flag to let the scrollend listener know this scroll is programmatic.
-            this.isProgrammaticScroll = true;
-            this.activeCellElement.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        if (this.isAutoscrollEnabled) {
+            // Scroll to the absolute bottom of the page
+            window.scrollTo({
+                top: document.documentElement.scrollHeight,
+                behavior: 'instant'
+            });
         }
     }
 

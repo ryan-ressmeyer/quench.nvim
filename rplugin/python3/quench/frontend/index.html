@@ -402,42 +402,39 @@
             display: none;
         }
 
+        /* Floating autoscroll button */
         #autoscroll-toggle {
-            background-color: #3c3c3c;
-            color: #d4d4d4;
-            border: 1px solid #555;
-            border-radius: 4px;
-            padding: 6px 12px;
-            font-size: 0.85em;
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background-color: #2a2a2a;
+            color: #ffffff;
+            border: 2px solid #404040;
+            font-size: 28px;
             cursor: pointer;
-            transition: background-color 0.2s, border-color 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            transition: all 0.2s ease;
+            z-index: 1000;
+            padding: 0;
+            line-height: 1;
+            padding-bottom: 10px; /* Adjust vertical centering for wedge character */
         }
 
         #autoscroll-toggle:hover {
-            background-color: #484848;
-            border-color: #666;
+            background-color: #3a3a3a;
+            border-color: #505050;
+            transform: scale(1.1);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
         }
 
-        #autoscroll-toggle.autoscroll-on {
-            background-color: #28a745;
-            border-color: #28a745;
-            color: #ffffff;
-        }
-
-        #autoscroll-toggle.autoscroll-on:hover {
-            background-color: #218838;
-            border-color: #218838;
-        }
-
-        #autoscroll-toggle.autoscroll-off {
-            background-color: #722f37;
-            border-color: #722f37;
-            color: #ffffff;
-        }
-
-        #autoscroll-toggle.autoscroll-off:hover {
-            background-color: #5d252b;
-            border-color: #5d252b;
+        #autoscroll-toggle:active {
+            transform: scale(0.95);
         }
     </style>
 </head>
@@ -464,7 +461,6 @@
                         (<span id="kernel-count">0</span>)
                     </span>
                 </div>
-                <button id="autoscroll-toggle" class="autoscroll-on" title="Toggle autoscrolling">Autoscroll On</button>
                 <div class="kernel-details-container">
                     <button id="kernel-info-toggle" title="View kernel status and details" class="disconnected">⬡</button>
                     <div id="kernel-info-dropdown" class="hidden">
@@ -499,6 +495,9 @@
             </div>
         </div>
     </div>
+
+    <!-- Floating autoscroll button (only visible when autoscroll is OFF) -->
+    <button id="autoscroll-toggle" title="Scroll to bottom and enable autoscroll" style="display: none;">⌄</button>
 
     <script src="/static/main.js?v=3"></script>
 </body>
