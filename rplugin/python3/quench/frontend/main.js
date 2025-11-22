@@ -387,23 +387,36 @@ class QuenchClient {
         // Shell commands often output \r\n which triggers the \r overwrite logic
         // destructively. We only want \r logic for isolated carriage returns.
         text = text.replace(/\r\n/g, '\n');
-        
-        // Create or find existing stream output
-        let streamDiv = outputDiv.querySelector(`[data-stream="${streamName}"]`);
+
+        // Only append to the last element if it's a matching stream block.
+        // This ensures that if a plot or other output type was displayed between
+        // print statements, new text appears below the plot rather than jumping
+        // back up to a previous text block.
+        const lastChild = outputDiv.lastElementChild;
+        let streamDiv = null;
+
+        // Check if we can append to the immediately preceding element
+        if (lastChild &&
+            lastChild.classList.contains('output-text') &&
+            lastChild.getAttribute('data-stream') === streamName) {
+            streamDiv = lastChild;
+        }
+
         if (!streamDiv) {
+            // Create a new stream block
             streamDiv = document.createElement('div');
             streamDiv.className = 'output-item output-text';
             streamDiv.setAttribute('data-stream', streamName);
-            
+
             const metadata = document.createElement('div');
             metadata.className = 'output-metadata';
             metadata.textContent = `${streamName}:`;
             streamDiv.appendChild(metadata);
-            
+
             const textDiv = document.createElement('pre');
             textDiv.className = 'output-text';
             streamDiv.appendChild(textDiv);
-            
+
             outputDiv.appendChild(streamDiv);
         }
         

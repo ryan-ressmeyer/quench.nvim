@@ -429,11 +429,30 @@ class KernelSession:
                         if parent_msg_id and parent_msg_id in self.pending_executions:
                             await self._send_cell_status(parent_msg_id, 'completed_error')
                             del self.pending_executions[parent_msg_id]
-                    
-                    # Append to output cache
-                    self.output_cache.append(message)
-                    
-                    # Forward to central relay queue
+
+                    # Cache coalescing: merge consecutive stream messages in the cache
+                    # to reduce reload time, while still sending granular updates to
+                    # the relay queue for real-time feedback.
+                    should_append_to_cache = True
+
+                    if message.get('msg_type') == 'stream' and self.output_cache:
+                        last_msg = self.output_cache[-1]
+
+                        # Check if compatible for merging: same msg_type, stream name, and parent msg_id
+                        if (last_msg.get('msg_type') == 'stream' and
+                            last_msg.get('content', {}).get('name') == message.get('content', {}).get('name') and
+                            last_msg.get('parent_header', {}).get('msg_id') == message.get('parent_header', {}).get('msg_id')):
+
+                            # Merge text into the existing cache entry
+                            last_msg['content']['text'] += message['content']['text']
+                            should_append_to_cache = False
+                            self._logger.debug(f"Coalesced stream message into cache for kernel {self.kernel_id[:8]}")
+
+                    if should_append_to_cache:
+                        self.output_cache.append(message)
+
+                    # Always forward the original granular message to relay queue
+                    # for real-time streaming feedback to connected clients
                     await self.relay_queue.put((self.kernel_id, message))
                     
                     self._logger.debug(f"Relayed message from kernel {self.kernel_id[:8]}: {message.get('msg_type', 'unknown')}")
