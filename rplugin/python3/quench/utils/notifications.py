@@ -22,6 +22,24 @@ def notify_user(nvim: Any, message: str, level: str = 'info') -> None:
         nvim.err_write(message + '\n')
 
 
+def notify_error_after_input(nvim: Any, message: str) -> None:
+    """
+    Display an error message after an input() dialog without requiring enter press.
+
+    This function clears the command line with redraw and displays a red error
+    message using echohl ErrorMsg, avoiding the "Press ENTER" prompt that
+    nvim.err_write() would trigger after input().
+
+    Args:
+        nvim: The pynvim.Nvim instance for interacting with Neovim
+        message: The error message to display
+    """
+    nvim.command('redraw')
+    # Escape single quotes for vim command
+    escaped = message.replace("'", "''")
+    nvim.command(f"echohl ErrorMsg | echo '{escaped}' | echohl None")
+
+
 def select_from_choices_sync(nvim: Any, choices: List[Dict[str, str]], prompt_title: str) -> Optional[Dict[str, str]]:
     """
     Helper method to present choices to user and get their selection.
@@ -101,13 +119,13 @@ def select_from_choices_sync(nvim: Any, choices: List[Dict[str, str]], prompt_ti
     # Handle None input (can happen in test environments or certain contexts)
     if choice_input is None:
         logger.error("Received None input")
-        notify_user(nvim, "No input received. Selection cancelled.", level='error')
+        notify_error_after_input(nvim, "No input received. Selection cancelled.")
         return None
 
     # Handle empty string input
     if isinstance(choice_input, str) and choice_input.strip() == '':
         logger.error("Received empty string input")
-        notify_user(nvim, "Empty input. Selection cancelled.", level='error')
+        notify_error_after_input(nvim, "Empty input. Selection cancelled.")
         return None
 
     logger.info(f"Processing input: {repr(choice_input)}")
@@ -120,9 +138,9 @@ def select_from_choices_sync(nvim: Any, choices: List[Dict[str, str]], prompt_ti
             return selected_choice
         else:
             logger.error(f"Invalid selection index {choice_idx}, must be between 0 and {len(choices)-1}")
-            notify_user(nvim, f"Invalid selection: number out of range (1-{len(choices)}). No kernel selected.", level='error')
+            notify_error_after_input(nvim, f"Invalid selection: number out of range (1-{len(choices)}). No kernel selected.")
             return None
     except (ValueError, TypeError) as e:
         logger.error(f"Failed to convert input '{choice_input}' to integer: {e}")
-        notify_user(nvim, f"Invalid input '{choice_input}'. Selection cancelled.", level='error')
+        notify_error_after_input(nvim, f"Invalid input '{choice_input}'. Selection cancelled.")
         return None

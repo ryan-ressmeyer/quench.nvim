@@ -57,7 +57,13 @@ class MockNvim:
     
     def command(self, cmd):
         """Mock command execution."""
-        pass
+        # Capture error messages from echohl ErrorMsg commands
+        if 'echohl ErrorMsg' in cmd and 'echo ' in cmd:
+            import re
+            # Extract message from: echohl ErrorMsg | echo 'message' | echohl None
+            match = re.search(r"echo '([^']*)'", cmd)
+            if match:
+                self.error_messages.append(match.group(1) + '\n')
 
 
 class TestQuenchPlugin:
