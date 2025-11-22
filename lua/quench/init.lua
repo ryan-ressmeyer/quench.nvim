@@ -1,5 +1,5 @@
 ---@class QuenchOpts
----@field web_server? { host?: string, port?: number }
+---@field web_server? { host?: string, port?: number, auto_select_port?: boolean }
 ---@field cell_delimiter? string
 
 ---@class CustomModule
@@ -15,6 +15,9 @@ M.setup = function(opts)
     end
     if opts.web_server.port then
       vim.g.quench_nvim_web_server_port = opts.web_server.port
+    end
+    if opts.web_server.auto_select_port ~= nil then
+      vim.g.quench_nvim_web_server_auto_select_port = opts.web_server.auto_select_port
     end
   end
 

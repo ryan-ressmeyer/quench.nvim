@@ -62,3 +62,25 @@ def get_web_server_port(nvim: Any, logger: logging.Logger) -> int:
     except Exception as e:
         logger.warning(f"Error getting web server port from Neovim variable: {e}")
         return 8765
+
+
+def get_web_server_auto_select_port(nvim: Any, logger: logging.Logger) -> bool:
+    """
+    Get the auto_select_port setting from Neovim global variable.
+
+    When enabled, the web server will automatically try subsequent ports if the
+    configured port is already in use. This is disabled by default for security
+    reasons, ensuring users don't accidentally expose the server on an unexpected port.
+
+    Args:
+        nvim: The pynvim.Nvim instance for interacting with Neovim
+        logger: Logger instance for error reporting
+
+    Returns:
+        bool: Whether to automatically select an available port, defaults to False.
+    """
+    try:
+        return nvim.vars.get('quench_nvim_web_server_auto_select_port', False)
+    except Exception as e:
+        logger.warning(f"Error getting auto_select_port from Neovim variable: {e}")
+        return False

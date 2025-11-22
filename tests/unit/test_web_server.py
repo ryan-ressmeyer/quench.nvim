@@ -14,6 +14,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'rplugin', 'python3'))
 
+import errno
 from quench.web_server import WebServer, DateTimeEncoder
 
 class TestDateTimeEncoder:
@@ -594,6 +595,179 @@ class TestWebServer:
 
         # Verify that closed connection was not sent a message
         mock_ws.send_str.assert_not_called()
+
+
+class TestAutoPortSelection:
+    """Test cases for the auto port selection feature."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.mock_nvim = Mock()
+        self.mock_kernel_manager = Mock()
+
+    def test_init_auto_select_port_default(self):
+        """Test that auto_select_port defaults to False."""
+        server = WebServer()
+        assert server.auto_select_port is False
+        assert server.max_port_attempts == 10
+
+    def test_init_auto_select_port_enabled(self):
+        """Test initialization with auto_select_port enabled."""
+        server = WebServer(port=8765, auto_select_port=True, max_port_attempts=5)
+        assert server.auto_select_port is True
+        assert server.max_port_attempts == 5
+        assert server.port == 8765
+        assert server._initial_port == 8765
+
+    @pytest.mark.asyncio
+    async def test_start_returns_tuple(self):
+        """Test that start() returns a tuple (used_fallback, original_port)."""
+        server = WebServer(port=8765)
+
+        with patch('quench.web_server.web') as mock_web:
+            mock_app = Mock()
+            mock_runner = AsyncMock()
+            mock_site = AsyncMock()
+
+            mock_web.Application.return_value = mock_app
+            mock_web.AppRunner.return_value = mock_runner
+            mock_web.TCPSite.return_value = mock_site
+
+            result = await server.start()
+
+            assert isinstance(result, tuple)
+            assert len(result) == 2
+            used_fallback, original_port = result
+            assert used_fallback is False
+            assert original_port is None
+
+    @pytest.mark.asyncio
+    async def test_auto_select_port_disabled_fails_immediately(self):
+        """Test that when auto_select_port is disabled, port binding failure raises immediately."""
+        server = WebServer(port=8765, auto_select_port=False)
+
+        with patch('quench.web_server.web') as mock_web:
+            mock_app = Mock()
+            mock_runner = AsyncMock()
+            mock_site = AsyncMock()
+
+            # Simulate port in use error
+            mock_site.start.side_effect = OSError(errno.EADDRINUSE, "Address already in use")
+
+            mock_web.Application.return_value = mock_app
+            mock_web.AppRunner.return_value = mock_runner
+            mock_web.TCPSite.return_value = mock_site
+
+            with patch.object(server, 'stop', new_callable=AsyncMock):
+                with pytest.raises(OSError) as exc_info:
+                    await server.start()
+
+                assert exc_info.value.errno == errno.EADDRINUSE
+
+            # Port should not have changed
+            assert server.port == 8765
+
+    @pytest.mark.asyncio
+    async def test_auto_select_port_enabled_retries_on_failure(self):
+        """Test that when auto_select_port is enabled, it tries subsequent ports."""
+        server = WebServer(port=8765, auto_select_port=True, max_port_attempts=10)
+
+        with patch('quench.web_server.web') as mock_web:
+            mock_app = Mock()
+            mock_runner = AsyncMock()
+
+            # First two ports fail, third succeeds
+            call_count = [0]
+
+            def create_mock_site(runner, host, port, reuse_address):
+                mock_site = AsyncMock()
+                call_count[0] += 1
+                if call_count[0] < 3:
+                    mock_site.start.side_effect = OSError(errno.EADDRINUSE, "Address already in use")
+                return mock_site
+
+            mock_web.Application.return_value = mock_app
+            mock_web.AppRunner.return_value = mock_runner
+            mock_web.TCPSite.side_effect = create_mock_site
+
+            used_fallback, original_port = await server.start()
+
+            assert used_fallback is True
+            assert original_port == 8765
+            assert server.port == 8767  # Started at 8765, failed twice, succeeded at 8767
+
+    @pytest.mark.asyncio
+    async def test_auto_select_port_exhausts_all_attempts(self):
+        """Test that after max_port_attempts, it raises an error."""
+        server = WebServer(port=8765, auto_select_port=True, max_port_attempts=3)
+
+        with patch('quench.web_server.web') as mock_web:
+            mock_app = Mock()
+            mock_runner = AsyncMock()
+            mock_site = AsyncMock()
+
+            # All ports fail
+            mock_site.start.side_effect = OSError(errno.EADDRINUSE, "Address already in use")
+
+            mock_web.Application.return_value = mock_app
+            mock_web.AppRunner.return_value = mock_runner
+            mock_web.TCPSite.return_value = mock_site
+
+            with patch.object(server, 'stop', new_callable=AsyncMock):
+                with pytest.raises(OSError) as exc_info:
+                    await server.start()
+
+                assert exc_info.value.errno == errno.EADDRINUSE
+                assert "Could not find an available port after 3 attempts" in str(exc_info.value)
+
+            # Port should have incremented through all attempts
+            assert server.port == 8768  # 8765 + 3 = 8768
+
+    @pytest.mark.asyncio
+    async def test_non_eaddrinuse_error_not_retried(self):
+        """Test that non-EADDRINUSE errors are not retried."""
+        server = WebServer(port=8765, auto_select_port=True, max_port_attempts=10)
+
+        with patch('quench.web_server.web') as mock_web:
+            mock_app = Mock()
+            mock_runner = AsyncMock()
+            mock_site = AsyncMock()
+
+            # Different error (e.g., permission denied)
+            mock_site.start.side_effect = OSError(errno.EACCES, "Permission denied")
+
+            mock_web.Application.return_value = mock_app
+            mock_web.AppRunner.return_value = mock_runner
+            mock_web.TCPSite.return_value = mock_site
+
+            with patch.object(server, 'stop', new_callable=AsyncMock):
+                with pytest.raises(OSError) as exc_info:
+                    await server.start()
+
+                assert exc_info.value.errno == errno.EACCES
+
+            # Port should not have changed since it wasn't EADDRINUSE
+            assert server.port == 8765
+
+    @pytest.mark.asyncio
+    async def test_first_port_succeeds_no_fallback(self):
+        """Test that when first port succeeds, no fallback is indicated."""
+        server = WebServer(port=8765, auto_select_port=True)
+
+        with patch('quench.web_server.web') as mock_web:
+            mock_app = Mock()
+            mock_runner = AsyncMock()
+            mock_site = AsyncMock()
+
+            mock_web.Application.return_value = mock_app
+            mock_web.AppRunner.return_value = mock_runner
+            mock_web.TCPSite.return_value = mock_site
+
+            used_fallback, original_port = await server.start()
+
+            assert used_fallback is False
+            assert original_port is None
+            assert server.port == 8765
 
 
 if __name__ == '__main__':

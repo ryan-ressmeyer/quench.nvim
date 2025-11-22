@@ -1,9 +1,10 @@
 import asyncio
+import errno
 import logging
 import json
 import os
 from datetime import datetime
-from typing import Dict, Set, Optional
+from typing import Dict, Set, Optional, Tuple
 from pathlib import Path
 
 try:
@@ -31,7 +32,15 @@ class WebServer:
     for relaying kernel output to browsers.
     """
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 8765, nvim=None, kernel_manager=None):
+    def __init__(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 8765,
+        nvim=None,
+        kernel_manager=None,
+        auto_select_port: bool = False,
+        max_port_attempts: int = 10,
+    ):
         """
         Initialize the web server.
 
@@ -40,20 +49,34 @@ class WebServer:
             port: Port number to bind the server to
             nvim: Neovim instance reference (for potential future use)
             kernel_manager: KernelSessionManager instance for accessing kernel sessions
+            auto_select_port: If True, automatically try subsequent ports when the
+                configured port is in use. Disabled by default for security.
+            max_port_attempts: Maximum number of ports to try when auto_select_port
+                is enabled. Default is 10.
         """
         self.host = host
         self.port = port
+        self._initial_port = port  # Track the originally requested port
         self.nvim = nvim
         self.kernel_manager = kernel_manager
+        self.auto_select_port = auto_select_port
+        self.max_port_attempts = max_port_attempts
         self.app = None
         self.runner = None
         self.site = None
         self.active_connections: Dict[str, Set] = {}
         self._logger = logging.getLogger("quench.web_server")
 
-    async def start(self):
+    async def start(self) -> Tuple[bool, Optional[int]]:
         """
         Start the aiohttp web server.
+
+        Returns:
+            Tuple[bool, Optional[int]]: A tuple of (used_fallback_port, original_port).
+                - used_fallback_port: True if a fallback port was used due to the
+                  original port being in use.
+                - original_port: The originally requested port if a fallback was used,
+                  None otherwise.
         """
         if web is None:
             raise RuntimeError("aiohttp is not installed. Please install it to use the web server functionality.")
@@ -61,7 +84,7 @@ class WebServer:
         try:
             # Initialize the aiohttp application
             self.app = web.Application()
-            
+
             # Add routes
             self.app.router.add_get('/', self._handle_index)
             self.app.router.add_get('/api/sessions', self._handle_sessions_api)
@@ -72,16 +95,72 @@ class WebServer:
             self.runner = web.AppRunner(self.app)
             await self.runner.setup()
 
-            # Create and start the TCP site
-            self.site = web.TCPSite(self.runner, self.host, self.port, reuse_address=True)
-            await self.site.start()
+            # Try to bind to the port, with optional fallback to subsequent ports
+            used_fallback, original_port = await self._try_bind_port()
 
             self._logger.info(f"Web server started on http://{self.host}:{self.port}")
+            return used_fallback, original_port
 
         except Exception as e:
             self._logger.error(f"Failed to start web server: {e}")
             await self.stop()
             raise
+
+    async def _try_bind_port(self) -> Tuple[bool, Optional[int]]:
+        """
+        Attempt to bind to the configured port, with optional fallback.
+
+        If auto_select_port is enabled and the port is in use, tries subsequent
+        ports up to max_port_attempts.
+
+        Returns:
+            Tuple[bool, Optional[int]]: (used_fallback, original_port)
+
+        Raises:
+            OSError: If binding fails and auto_select_port is disabled, or if
+                all attempted ports are in use.
+        """
+        original_port = self.port
+        last_error = None
+
+        for attempt in range(self.max_port_attempts):
+            try:
+                self.site = web.TCPSite(self.runner, self.host, self.port, reuse_address=True)
+                await self.site.start()
+
+                # Success - check if we used a fallback port
+                used_fallback = self.port != original_port
+                return used_fallback, original_port if used_fallback else None
+
+            except OSError as e:
+                last_error = e
+                is_addr_in_use = e.errno == errno.EADDRINUSE
+
+                if not is_addr_in_use:
+                    # Different error, don't retry
+                    raise
+
+                if not self.auto_select_port:
+                    # Auto port selection disabled, fail immediately
+                    self._logger.error(
+                        f"Port {self.port} is already in use. "
+                        "Set auto_select_port=true to automatically try other ports."
+                    )
+                    raise
+
+                # Try next port
+                self.port += 1
+                self._logger.info(
+                    f"Port {self.port - 1} in use, trying port {self.port} "
+                    f"(attempt {attempt + 2}/{self.max_port_attempts})"
+                )
+
+        # All attempts exhausted
+        raise OSError(
+            errno.EADDRINUSE,
+            f"Could not find an available port after {self.max_port_attempts} attempts "
+            f"(tried ports {original_port}-{self.port - 1})"
+        )
 
     async def stop(self):
         """
