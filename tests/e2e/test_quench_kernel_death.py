@@ -70,7 +70,7 @@ async def test_quench_kernel_death_detection():
 
         # Try to run the second cell - this should trigger auto-restart
         print("🔄 Running second cell to trigger auto-restart...")
-        nvim_instance.add_command('normal! 11G')  # Go to second cell
+        nvim_instance.add_command('normal! 13G')  # Go to second cell
         nvim_instance.add_command('QuenchRunCell')
 
         # Wait for:

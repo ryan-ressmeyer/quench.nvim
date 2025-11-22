@@ -120,7 +120,7 @@ def select_from_choices_sync(nvim: Any, choices: List[Dict[str, str]], prompt_ti
             return selected_choice
         else:
             logger.error(f"Invalid selection index {choice_idx}, must be between 0 and {len(choices)-1}")
-            notify_user(nvim, "Invalid selection", level='error')
+            notify_user(nvim, f"Invalid selection: number out of range (1-{len(choices)}). No kernel selected.", level='error')
             return None
     except (ValueError, TypeError) as e:
         logger.error(f"Failed to convert input '{choice_input}' to integer: {e}")

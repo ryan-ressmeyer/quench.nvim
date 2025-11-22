@@ -176,11 +176,7 @@ class Quench:
 
             selected_choice = select_from_choices_sync(self.nvim, choices, "Please select a kernel")
 
-            if not selected_choice:
-                # Fallback to first available choice
-                selected_choice = choices[0]
-
-            return selected_choice
+            return selected_choice  # Returns None if cancelled/invalid
 
         except Exception as e:
             self._logger.error(f"Error during kernel selection: {e}")
