@@ -12,7 +12,7 @@ from .web_server import WebServer
 from .ui_manager import NvimUIManager
 
 # Import utilities
-from .utils.notifications import notify_user, select_from_choices_sync
+from .utils.notifications import notify_user, notify_user_echo, select_from_choices_sync
 
 # Import core modules
 from .core.config import get_web_server_host, get_web_server_port, get_web_server_auto_select_port
@@ -786,7 +786,8 @@ class Quench:
             # If accessing buffer/kernel info fails, just open the root URL
             self._logger.warning(f"Error determining kernel context for QuenchOpen: {e}")
 
-        notify_user(self.nvim, f"Opening Quench in browser: {url}")
+        base_url = f"http://{self.web_server.host}:{self.web_server.port}"
+        notify_user_echo(self.nvim, f"Opening {base_url}...")
 
         # Open the URL in a new tab if possible
         try:

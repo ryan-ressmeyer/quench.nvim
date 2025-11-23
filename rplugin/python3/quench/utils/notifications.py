@@ -22,6 +22,24 @@ def notify_user(nvim: Any, message: str, level: str = 'info') -> None:
         nvim.err_write(message + '\n')
 
 
+def notify_user_echo(nvim: Any, message: str, level: str = 'info') -> None:
+    """
+    Send a notification without requiring Enter press.
+
+    Uses nvim_echo API to avoid the "Press ENTER" prompt.
+
+    Args:
+        nvim: The pynvim.Nvim instance for interacting with Neovim
+        message: The message to display to the user
+        level: The notification level ('info' or 'error')
+    """
+    nvim.command('redraw')
+    if level == 'error':
+        nvim.api.echo([[message, 'ErrorMsg']], False, {})
+    else:
+        nvim.api.echo([[message, '']], False, {})
+
+
 def notify_error_after_input(nvim: Any, message: str) -> None:
     """
     Display an error message after an input() dialog without requiring enter press.
