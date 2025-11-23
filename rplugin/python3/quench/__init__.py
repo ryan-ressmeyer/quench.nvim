@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import webbrowser
 logging.basicConfig(filename="/tmp/quench.log", level=logging.DEBUG)
 from typing import Optional 
 
@@ -757,6 +758,42 @@ class Quench:
         """
         from .commands.debug import debug_command_impl
         return debug_command_impl(self)
+
+    @pynvim.command('QuenchOpen', sync=True)
+    def open_command(self):
+        """
+        Open the Quench frontend in the default web browser.
+        """
+        self._logger.info("QuenchOpen called")
+
+        if not self.web_server_started or not self.web_server:
+            notify_user(self.nvim, "Web server is not running. Run :QuenchStartKernel or :QuenchRunCell first.", level='error')
+            return
+
+        # Build the base URL
+        url = f"http://{self.web_server.host}:{self.web_server.port}"
+
+        # Context Awareness: Try to get the kernel ID for the current buffer
+        try:
+            current_bnum = self.nvim.current.buffer.number
+            # Check if this buffer is mapped to a kernel
+            if current_bnum in self.kernel_manager.buffer_to_kernel_map:
+                kernel_id = self.kernel_manager.buffer_to_kernel_map[current_bnum]
+                # Check if that kernel is actually active
+                if kernel_id in self.kernel_manager.sessions:
+                    url += f"?kernel_id={kernel_id}"
+        except Exception as e:
+            # If accessing buffer/kernel info fails, just open the root URL
+            self._logger.warning(f"Error determining kernel context for QuenchOpen: {e}")
+
+        notify_user(self.nvim, f"Opening Quench in browser: {url}")
+
+        # Open the URL in a new tab if possible
+        try:
+            webbrowser.open_new_tab(url)
+        except Exception as e:
+            notify_user(self.nvim, f"Failed to open browser: {e}", level='error')
+            self._logger.error(f"Failed to open browser: {e}")
 
     # Kernel Management Commands
     @pynvim.command('QuenchInterruptKernel', sync=True)
