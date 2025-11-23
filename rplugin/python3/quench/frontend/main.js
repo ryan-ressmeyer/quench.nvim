@@ -17,6 +17,8 @@ class QuenchClient {
         this.scrollDebounceTimer = null; // Timer for scroll debouncing
         this.isKernelDataLoaded = false; // Track if kernel data is loaded
         this.loadingTimeout = null; // Timeout for loading fallback
+        this.pollingIntervalId = null; // Interval ID for kernel polling
+        this.lastKernelIds = null; // Track kernel IDs to prevent redundant updates
 
         // State machine properties for reactive kernel status
         this.connectionState = 'disconnected';
@@ -54,11 +56,31 @@ class QuenchClient {
         
         // Load available kernels on startup
         this.loadKernels();
-        
+
+        // Start periodic polling for kernel list
+        this.startKernelPolling();
+
         // Also check URL for kernel_id (backward compatibility)
         const urlKernelId = this.getKernelIdFromUrl();
         if (urlKernelId) {
             setTimeout(() => this.selectKernel(urlKernelId), 500);
+        }
+    }
+
+    startKernelPolling() {
+        // Clear any existing polling interval
+        this.stopKernelPolling();
+
+        // Poll every 1 second
+        this.pollingIntervalId = setInterval(() => {
+            this.loadKernels();
+        }, 1000);
+    }
+
+    stopKernelPolling() {
+        if (this.pollingIntervalId) {
+            clearInterval(this.pollingIntervalId);
+            this.pollingIntervalId = null;
         }
     }
 
@@ -123,7 +145,7 @@ class QuenchClient {
         try {
             // Set loading state without changing dropdown content if not already loading
             const wasLoading = this.kernelSelect.innerHTML.includes('Loading kernels...');
-            if (!wasLoading) {
+            if (!wasLoading && !this.isKernelDataLoaded) {
                 this.kernelSelect.innerHTML = '<option value="">Loading kernels...</option>';
             }
 
@@ -136,10 +158,29 @@ class QuenchClient {
                 this.loadingTimeout = null;
             }
 
-            this.kernelSelect.innerHTML = '<option value="">Select a kernel...</option>';
-
             const sessions = data.sessions || {};
             const sessionCount = Object.keys(sessions).length;
+            const currentKernelIds = Object.keys(sessions).sort().join(',');
+
+            // Check if kernel list has changed to prevent redundant DOM updates
+            if (this.lastKernelIds === currentKernelIds && this.isKernelDataLoaded) {
+                // Only update the count display, skip dropdown rebuild
+                if (this.kernelCount) {
+                    this.kernelCount.textContent = sessionCount;
+                    if (this.kernelCountContainer) {
+                        this.kernelCountContainer.style.display = sessionCount > 0 ? 'inline-block' : 'none';
+                    }
+                }
+                return;
+            }
+
+            // Store the current kernel IDs for future comparison
+            this.lastKernelIds = currentKernelIds;
+
+            // Remember currently selected kernel to restore after rebuild
+            const previouslySelectedKernelId = this.kernelSelect.value;
+
+            this.kernelSelect.innerHTML = '<option value="">Select a kernel...</option>';
 
             // Update the kernel count display
             if (this.kernelCount) {
@@ -160,6 +201,17 @@ class QuenchClient {
                     option.textContent = `${session.kernel_name} (${session.short_id}) - ${bufferCount} buffer${bufferCount !== 1 ? 's' : ''}`;
                     this.kernelSelect.appendChild(option);
                 });
+
+                // Restore previous selection if it still exists
+                if (previouslySelectedKernelId && sessions[previouslySelectedKernelId]) {
+                    this.kernelSelect.value = previouslySelectedKernelId;
+                }
+                // Auto-select if only one kernel and none currently selected/connected
+                else if (sessionCount === 1 && !this.kernelId) {
+                    const singleKernelId = Object.keys(sessions)[0];
+                    this.kernelSelect.value = singleKernelId;
+                    this.onKernelSelected();
+                }
             } else {
                 const option = document.createElement('option');
                 option.value = '';
@@ -864,10 +916,59 @@ class QuenchClient {
     renderMimeType(container, mimeType, data, metadata) {
         switch (mimeType) {
             case 'text/html':
-                const htmlDiv = document.createElement('div');
-                htmlDiv.className = 'output-html';
-                htmlDiv.innerHTML = Array.isArray(data) ? data.join('') : data;
-                container.appendChild(htmlDiv);
+                const htmlContent = Array.isArray(data) ? data.join('') : data;
+
+                // Check if the HTML contains script tags (e.g., matplotlib animations)
+                // Scripts inserted via innerHTML don't execute, so we need an iframe
+                if (htmlContent.includes('<script')) {
+                    // Use an iframe with srcdoc to create a separate document context
+                    // where scripts will execute properly
+                    const iframe = document.createElement('iframe');
+                    iframe.className = 'output-html-iframe';
+                    iframe.style.cssText = 'width: 100%; border: none; background: white; border-radius: 4px;';
+                    iframe.sandbox = 'allow-scripts allow-same-origin';
+
+                    // Wrap content in a full HTML document with proper styling
+                    const wrappedContent = `
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                            <style>
+                                body {
+                                    margin: 0;
+                                    padding: 10px;
+                                    font-family: sans-serif;
+                                    background: white;
+                                }
+                                /* Style matplotlib animation controls */
+                                button { cursor: pointer; }
+                            </style>
+                        </head>
+                        <body>${htmlContent}</body>
+                        </html>
+                    `;
+                    iframe.srcdoc = wrappedContent;
+
+                    // Auto-resize iframe to fit content
+                    iframe.onload = () => {
+                        try {
+                            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                            const height = iframeDoc.body.scrollHeight;
+                            iframe.style.height = (height + 20) + 'px';
+                        } catch (e) {
+                            // Fallback height if we can't access the content
+                            iframe.style.height = '500px';
+                        }
+                    };
+
+                    container.appendChild(iframe);
+                } else {
+                    // Simple HTML without scripts - use innerHTML for efficiency
+                    const htmlDiv = document.createElement('div');
+                    htmlDiv.className = 'output-html';
+                    htmlDiv.innerHTML = htmlContent;
+                    container.appendChild(htmlDiv);
+                }
                 break;
                 
             case 'text/markdown':
