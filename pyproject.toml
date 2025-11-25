@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Interactive Python development in Neovim using cell-based execution"
 readme = "README.md"
 requires-python = ">=3.8"
-license = {text = "MIT"}
+license = "MIT"
 authors = [
     {name = "Ryan Ressmeyer", email = "ryan.ressmeyer@example.com"}
 ]
@@ -16,7 +16,6 @@ keywords = ["neovim", "jupyter", "ipython", "python", "interactive", "repl"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
@@ -89,3 +88,6 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "if TYPE_CHECKING:",
 ]
+
+[tool.setuptools.packages.find]
+where = ["rplugin/python3"]
