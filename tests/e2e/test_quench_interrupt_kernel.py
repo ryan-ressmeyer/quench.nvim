@@ -11,6 +11,7 @@ Python code execution in a kernel session. The test:
 
 This test is designed to discover bugs with the interrupt functionality.
 """
+
 import asyncio
 import pytest
 from pathlib import Path
@@ -32,7 +33,7 @@ async def test_quench_interrupt_kernel():
     5. Kernel remains responsive after interrupt
     6. No critical errors occur in the process
     """
-    test_config_path = Path(__file__).parent / 'test_nvim_config.lua'
+    test_config_path = Path(__file__).parent / "test_nvim_config.lua"
     nvim_instance = TestNeovimInstance(config_file=str(test_config_path))
 
     try:
@@ -48,23 +49,23 @@ async def test_quench_interrupt_kernel():
             "import time",
             "print('Starting long-running operation...')",
             "time.sleep(6)  # This should be interrupted",
-            "print('This should NOT appear if interrupt works!')"
+            "print('This should NOT appear if interrupt works!')",
         ]
 
-        await nvim_instance.create_test_buffer(test_content, 'test_interrupt.py')
+        await nvim_instance.create_test_buffer(test_content, "test_interrupt.py")
 
         # Step 3: Queue commands for execution
         print("Queueing commands for QuenchInterruptKernel test...")
 
         # Position cursor at the first cell and execute (this will auto-create kernel)
-        nvim_instance.add_command('normal! 3G')  # Go to line 3 (first # %%)
+        nvim_instance.add_command("normal! 3G")  # Go to line 3 (first # %%)
         nvim_instance.add_command('call feedkeys("1\\<CR>", "t")')  # Select first kernel option
-        nvim_instance.add_command('QuenchRunCell')  # This will auto-create kernel and execute code
-        nvim_instance.add_command('sleep 3')  # Give code time to start running
+        nvim_instance.add_command("QuenchRunCell")  # This will auto-create kernel and execute code
+        nvim_instance.add_command("sleep 3")  # Give code time to start running
 
         # Interrupt the execution
-        nvim_instance.add_command('QuenchInterruptKernel')  # This should interrupt the sleep
-        nvim_instance.add_command('sleep 7')  # Allow interrupt to process
+        nvim_instance.add_command("QuenchInterruptKernel")  # This should interrupt the sleep
+        nvim_instance.add_command("sleep 7")  # Allow interrupt to process
 
         # Step 4: Execute all commands and wait for completion
         print("Executing all commands...")
@@ -84,13 +85,13 @@ async def test_quench_interrupt_kernel():
 
         # Step 7: Generate detailed test results
         test_results = {
-            'interrupt_successful': interrupt_results['interrupt_successful'],
-            'code_started': interrupt_results['code_started'],
-            'code_completed': interrupt_results['code_completed'],
-            'has_errors': error_check['has_errors'],
-            'error_summary': error_check['summary'],
-            'all_messages': all_messages,
-            'log_content': log_content
+            "interrupt_successful": interrupt_results["interrupt_successful"],
+            "code_started": interrupt_results["code_started"],
+            "code_completed": interrupt_results["code_completed"],
+            "has_errors": error_check["has_errors"],
+            "error_summary": error_check["summary"],
+            "all_messages": all_messages,
+            "log_content": log_content,
         }
 
         # Step 8: Report results and determine pass/fail
@@ -102,8 +103,9 @@ async def test_quench_interrupt_kernel():
         print(f"Error Summary: {test_results['error_summary']}")
 
         # Primary success criteria: Code should start but not complete due to interrupt
-        if test_results['has_errors']:
-            pytest.fail(f"""
+        if test_results["has_errors"]:
+            pytest.fail(
+                f"""
 ❌ QUENCH INTERRUPT KERNEL TEST FAILED - ERRORS DETECTED
 
 The QuenchInterruptKernel command was executed but errors were found:
@@ -122,10 +124,12 @@ Code Completed: {test_results['code_completed']}
 
 === Log Content ===
 {test_results['log_content']}
-""")
+"""
+            )
 
-        elif not test_results['code_started']:
-            pytest.fail(f"""
+        elif not test_results["code_started"]:
+            pytest.fail(
+                f"""
 ❌ CODE EXECUTION NEVER STARTED
 
 The long-running Python code never began executing:
@@ -137,10 +141,12 @@ Code Completed: {test_results['code_completed']}
 
 === All Messages ===
 {chr(10).join(test_results['all_messages'])}
-""")
+"""
+            )
 
-        elif test_results['code_completed']:
-            pytest.fail(f"""
+        elif test_results["code_completed"]:
+            pytest.fail(
+                f"""
 ❌ INTERRUPT FAILED - CODE COMPLETED
 
 The interrupt did not work! The long-running code completed execution:
@@ -154,10 +160,12 @@ This indicates QuenchInterruptKernel is not working properly.
 
 === All Messages ===
 {chr(10).join(test_results['all_messages'])}
-""")
+"""
+            )
 
         else:
-            print(f"""
+            print(
+                f"""
 ✅ QUENCH INTERRUPT KERNEL TEST PASSED
 
 QuenchInterruptKernel successfully interrupted the long-running code:
@@ -170,7 +178,8 @@ QuenchInterruptKernel successfully interrupted the long-running code:
 Code Started: {test_results['code_started']} ✅
 Interrupt Successful: {test_results['interrupt_successful']} ✅
 Code Completed: {test_results['code_completed']} ✅ (correctly False)
-""")
+"""
+            )
 
     finally:
         # Cleanup
@@ -193,21 +202,25 @@ def filter_expected_interrupt_errors(error_check: dict) -> dict:
     Returns:
         Modified error_check dictionary with KeyboardInterrupt errors filtered out
     """
+
     def is_expected_interrupt_log(err: str) -> bool:
         """Check if a log line is expected during interrupt handling."""
         err_lower = err.lower()
 
         # KeyboardInterrupt exceptions are expected
-        if 'keyboardinterrupt' in err_lower:
+        if "keyboardinterrupt" in err_lower:
             return True
 
         # DEBUG logs about processing error messages are normal flow
-        if 'debug:' in err_lower and any(phrase in err_lower for phrase in [
-            'relaying message: error',
-            'relayed message from kernel',
-            'processing message type: error',
-            "sent cell status 'completed_error'",
-        ]):
+        if "debug:" in err_lower and any(
+            phrase in err_lower
+            for phrase in [
+                "relaying message: error",
+                "relayed message from kernel",
+                "processing message type: error",
+                "sent cell status 'completed_error'",
+            ]
+        ):
             return True
 
         return False
@@ -215,50 +228,39 @@ def filter_expected_interrupt_errors(error_check: dict) -> dict:
     filtered_check = error_check.copy()
 
     # Filter out expected interrupt-related log errors
-    filtered_log_errors = [
-        err for err in error_check['log_errors']
-        if not is_expected_interrupt_log(err)
-    ]
-    filtered_check['log_errors'] = filtered_log_errors
+    filtered_log_errors = [err for err in error_check["log_errors"] if not is_expected_interrupt_log(err)]
+    filtered_check["log_errors"] = filtered_log_errors
 
     # Filter out expected interrupt-related nvim errors
-    filtered_nvim_errors = [
-        err for err in error_check['nvim_errors']
-        if not is_expected_interrupt_log(err)
-    ]
-    filtered_check['nvim_errors'] = filtered_nvim_errors
+    filtered_nvim_errors = [err for err in error_check["nvim_errors"] if not is_expected_interrupt_log(err)]
+    filtered_check["nvim_errors"] = filtered_nvim_errors
 
     # Filter out expected interrupt-related stderr errors
-    filtered_stderr_errors = [
-        err for err in error_check['stderr_errors']
-        if not is_expected_interrupt_log(err)
-    ]
-    filtered_check['stderr_errors'] = filtered_stderr_errors
+    filtered_stderr_errors = [err for err in error_check["stderr_errors"] if not is_expected_interrupt_log(err)]
+    filtered_check["stderr_errors"] = filtered_stderr_errors
 
     # Recalculate has_errors based on filtered results
-    filtered_check['has_errors'] = bool(
-        filtered_check['log_errors'] or
-        filtered_check['nvim_errors'] or
-        filtered_check['stderr_errors']
+    filtered_check["has_errors"] = bool(
+        filtered_check["log_errors"] or filtered_check["nvim_errors"] or filtered_check["stderr_errors"]
     )
 
     # Update summary
     issues = []
-    if filtered_check['nvim_errors']:
+    if filtered_check["nvim_errors"]:
         issues.append(f"{len(filtered_check['nvim_errors'])} Neovim errors")
-    if filtered_check['nvim_warnings']:
+    if filtered_check["nvim_warnings"]:
         issues.append(f"{len(filtered_check['nvim_warnings'])} Neovim warnings")
-    if filtered_check['log_errors']:
+    if filtered_check["log_errors"]:
         issues.append(f"{len(filtered_check['log_errors'])} log errors")
-    if filtered_check['log_warnings']:
+    if filtered_check["log_warnings"]:
         issues.append(f"{len(filtered_check['log_warnings'])} log warnings")
-    if filtered_check['stderr_errors']:
+    if filtered_check["stderr_errors"]:
         issues.append(f"{len(filtered_check['stderr_errors'])} stderr errors")
 
     if issues:
-        filtered_check['summary'] = f"Found: {', '.join(issues)}"
+        filtered_check["summary"] = f"Found: {', '.join(issues)}"
     else:
-        filtered_check['summary'] = "No errors or warnings detected (KeyboardInterrupt filtered)"
+        filtered_check["summary"] = "No errors or warnings detected (KeyboardInterrupt filtered)"
 
     return filtered_check
 
@@ -274,23 +276,19 @@ def analyze_interrupt_success(all_messages: list, log_content: str) -> dict:
     Returns:
         Dictionary with interrupt analysis results
     """
-    results = {
-        'code_started': False,
-        'interrupt_successful': False,
-        'code_completed': False
-    }
+    results = {"code_started": False, "interrupt_successful": False, "code_completed": False}
 
     # Combine all text sources for analysis
-    combined_text = ' '.join(all_messages + [log_content]).lower()
+    combined_text = " ".join(all_messages + [log_content]).lower()
 
     # Check if the long-running code started
-    if 'starting long-running operation' in combined_text:
-        results['code_started'] = True
+    if "starting long-running operation" in combined_text:
+        results["code_started"] = True
         print("✅ Long-running code started execution")
 
     # Check if the code completed (this should NOT happen if interrupt worked)
-    if 'this should not appear if interrupt works' in combined_text:
-        results['code_completed'] = True
+    if "this should not appear if interrupt works" in combined_text:
+        results["code_completed"] = True
         print("❌ Code completed - interrupt failed!")
     else:
         print("✅ Code did not complete - likely interrupted")
@@ -298,22 +296,22 @@ def analyze_interrupt_success(all_messages: list, log_content: str) -> dict:
     # Check for evidence of successful interrupt
     # Look for interrupt-related messages or KeyboardInterrupt exceptions
     interrupt_indicators = [
-        'keyboardinterrupt',
-        'interrupted',
-        'interrupt',
-        'quenchinterruptkernel',
+        "keyboardinterrupt",
+        "interrupted",
+        "interrupt",
+        "quenchinterruptkernel",
     ]
 
     for indicator in interrupt_indicators:
         if indicator in combined_text:
-            results['interrupt_successful'] = True
+            results["interrupt_successful"] = True
             print(f"✅ Found interrupt indicator: {indicator}")
             break
 
     # If code started but didn't complete, and we didn't find explicit interrupt indicators,
     # we can still infer that interrupt likely worked
-    if results['code_started'] and not results['code_completed']:
-        results['interrupt_successful'] = True
+    if results["code_started"] and not results["code_completed"]:
+        results["interrupt_successful"] = True
         print("✅ Inferred successful interrupt (code started but didn't complete)")
 
     return results

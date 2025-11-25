@@ -25,7 +25,20 @@ vim.opt.runtimepath:prepend(current_dir)
 vim.opt.runtimepath:append(current_dir .. '/rplugin')
 
 -- Enable Python 3 provider (required for pynvim)
-vim.g.python3_host_prog = '/home/ryanress/code/ubuntu-config/nvim/pynvim-env/.venv/bin/python'
+-- Use environment variable if set (for CI), otherwise use exepath to find python3
+local python_host = os.getenv('NVIM_PYTHON_HOST')
+if python_host then
+  vim.g.python3_host_prog = python_host
+else
+  -- Try to find python3 in PATH
+  local python_path = vim.fn.exepath('python3') or vim.fn.exepath('python')
+  if python_path ~= '' then
+    vim.g.python3_host_prog = python_path
+  else
+    -- Fallback to local development path
+    vim.g.python3_host_prog = '/home/ryanress/code/ubuntu-config/nvim/pynvim-env/.venv/bin/python'
+  end
+end
 
 -- Configure Quench plugin settings for testing
 vim.g.quench_log_level = 'DEBUG'

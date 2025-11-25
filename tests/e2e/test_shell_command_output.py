@@ -6,6 +6,7 @@ properly display their output in the Quench frontend. This reproduces
 a bug where CRLF line endings from PTY output are incorrectly handled
 by the \r overwrite logic, causing shell command output to disappear.
 """
+
 import asyncio
 import pytest
 import time
@@ -28,7 +29,7 @@ async def test_shell_command_output():
     Bug: Shell commands output \r\n (CRLF) which triggers the \r overwrite
     logic in handleStream, causing the actual output to be deleted.
     """
-    test_config_path = Path(__file__).parent / 'test_nvim_config.lua'
+    test_config_path = Path(__file__).parent / "test_nvim_config.lua"
     nvim_instance = TestNeovimInstance(config_file=str(test_config_path))
 
     try:
@@ -43,19 +44,17 @@ async def test_shell_command_output():
             '! echo "Hello from shell"',
         ]
 
-        test_file = await nvim_instance.create_test_buffer(
-            test_content, 'test_shell_commands.py'
-        )
+        test_file = await nvim_instance.create_test_buffer(test_content, "test_shell_commands.py")
 
         # Step 3: Queue commands for execution
         print("Queueing commands for shell command test...")
 
         # Position cursor at the first cell and execute
-        nvim_instance.add_command('normal! 3G')  # Go to line 3 (first # %%)
+        nvim_instance.add_command("normal! 3G")  # Go to line 3 (first # %%)
         nvim_instance.add_command('call feedkeys("1\\<CR>", "t")')  # Select first kernel
-        nvim_instance.add_command('QuenchRunCell')  # Execute first cell
-        nvim_instance.add_command('sleep 8')  # Allow time for execution
-        nvim_instance.add_command('QuenchStatus')  # Check system status
+        nvim_instance.add_command("QuenchRunCell")  # Execute first cell
+        nvim_instance.add_command("sleep 8")  # Allow time for execution
+        nvim_instance.add_command("QuenchStatus")  # Check system status
 
         # Step 4: Execute all commands and wait for completion
         print("Executing all commands...")
@@ -74,17 +73,18 @@ async def test_shell_command_output():
         print(f"Found 'Hello from shell': {test_results['found_hello']}")
 
         # Determine pass/fail
-        all_found = test_results['found_hello']
+        all_found = test_results["found_hello"]
 
         if not all_found:
             # Print diagnostic information
             print("\n=== DIAGNOSTIC INFO ===")
             print("Log content (last 50 lines):")
-            log_lines = log_content.split('\n')
+            log_lines = log_content.split("\n")
             for line in log_lines[-50:]:
                 print(f"  {line}")
 
-            pytest.fail(f"""
+            pytest.fail(
+                f"""
 ❌ SHELL COMMAND OUTPUT TEST FAILED
 
 Shell command output 'Hello from shell' was not found in the Quench logs or messages.
@@ -95,14 +95,17 @@ This indicates the bug where CRLF line endings cause output to disappear.
 
 === All Messages ===
 {chr(10).join(all_messages[-20:]) if all_messages else '(empty)'}
-""")
+"""
+            )
 
         else:
-            print(f"""
+            print(
+                f"""
 ✅ SHELL COMMAND OUTPUT TEST PASSED
 
 Shell command output 'Hello from shell' was found successfully!
-""")
+"""
+            )
 
     finally:
         # Cleanup
@@ -120,10 +123,10 @@ def check_shell_outputs(log_content: str, all_messages: list) -> dict:
     Returns:
         Dictionary with boolean flag for expected output
     """
-    combined_text = log_content + ' ' + ' '.join(all_messages)
+    combined_text = log_content + " " + " ".join(all_messages)
 
     results = {
-        'found_hello': 'Hello from shell' in combined_text,
+        "found_hello": "Hello from shell" in combined_text,
     }
 
     return results

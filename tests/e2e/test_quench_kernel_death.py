@@ -10,6 +10,7 @@ Steps:
 3. Externally kill the kernel process (SIGKILL)
 4. Verify Quench detects the death and updates state
 """
+
 import asyncio
 import pytest
 import os
@@ -25,7 +26,7 @@ async def test_quench_kernel_death_detection():
     """
     Test that the plugin detects when a kernel process is killed.
     """
-    test_config_path = Path(__file__).parent / 'test_nvim_config.lua'
+    test_config_path = Path(__file__).parent / "test_nvim_config.lua"
     nvim_instance = TestNeovimInstance(config_file=str(test_config_path))
 
     try:
@@ -50,36 +51,36 @@ async def test_quench_kernel_death_detection():
             "# %%",
             "# Cell 2: This should trigger auto-restart and execute successfully",
             "print('AUTO_RESTART_SUCCESS: Kernel auto-restarted and executed this cell!')",
-            "print(f'New Kernel PID: {os.getpid()}')"
+            "print(f'New Kernel PID: {os.getpid()}')",
         ]
 
-        await nvim_instance.create_test_buffer(test_content, 'test_kernel_death.py')
+        await nvim_instance.create_test_buffer(test_content, "test_kernel_death.py")
 
         # Step 3: Execute all commands in a SINGLE Neovim session
         print("🚀 Starting kernel and triggering death...")
-        nvim_instance.add_command('normal! 3G')  # Go to first cell
+        nvim_instance.add_command("normal! 3G")  # Go to first cell
         nvim_instance.add_command('call feedkeys("1\\<CR>", "t")')  # Select first kernel option
-        nvim_instance.add_command('QuenchRunCell')  # Run cell that kills the kernel
+        nvim_instance.add_command("QuenchRunCell")  # Run cell that kills the kernel
 
         # Wait for:
         # - Kernel startup (~3 seconds)
         # - Cell execution delay (2 seconds)
         # - Kernel death
         # - Monitor loop detection (2 second poll interval + some buffer)
-        nvim_instance.add_command('sleep 10')
+        nvim_instance.add_command("sleep 10")
 
         # Try to run the second cell - this should trigger auto-restart
         print("🔄 Running second cell to trigger auto-restart...")
-        nvim_instance.add_command('normal! 13G')  # Go to second cell
-        nvim_instance.add_command('QuenchRunCell')
+        nvim_instance.add_command("normal! 13G")  # Go to second cell
+        nvim_instance.add_command("QuenchRunCell")
 
         # Wait for:
         # - Auto-restart detection and new kernel startup (can take up to 30 seconds - wait_for_ready timeout)
         # - Cell execution and output logging
-        nvim_instance.add_command('sleep 30')
+        nvim_instance.add_command("sleep 30")
 
         # Check status
-        nvim_instance.add_command('QuenchStatus')
+        nvim_instance.add_command("QuenchStatus")
 
         # Step 4: Execute all commands in one shot
         print("⏳ Executing test sequence...")
@@ -126,7 +127,7 @@ async def test_quench_kernel_death_detection():
             print("✅ Cell executed successfully after auto-restart!")
 
         # Step 8: Verify Test Completed Without Timeout
-        if result.get('timeout'):
+        if result.get("timeout"):
             pytest.fail("❌ Test timed out")
 
         print("✅ All auto-restart tests passed!")

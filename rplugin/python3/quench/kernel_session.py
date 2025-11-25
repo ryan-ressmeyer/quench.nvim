@@ -8,6 +8,7 @@ from typing import Optional, Dict, Set, List
 
 try:
     from jupyter_client import AsyncKernelManager, AsyncKernelClient
+
     JUPYTER_CLIENT_AVAILABLE = True
 except ImportError:
     # Graceful fallback if jupyter_client is not installed
@@ -39,11 +40,11 @@ class KernelSession:
         self.listener_task: Optional[asyncio.Task] = None
         self.monitor_task: Optional[asyncio.Task] = None
         self.buffer_name = buffer_name or f"kernel_{self.kernel_id[:8]}"
-        self.kernel_name = kernel_name or 'python3'
+        self.kernel_name = kernel_name or "python3"
         self.python_executable = sys.executable
-        self.created_at = __import__('datetime').datetime.now()
+        self.created_at = __import__("datetime").datetime.now()
         self._logger = logging.getLogger(f"quench.kernel.{self.kernel_id[:8]}")
-        
+
         # Track kernel busy/idle state for cell status indicators
         self.is_busy = False
         self.pending_executions: Dict[str, str] = {}  # msg_id -> status
@@ -60,7 +61,9 @@ class KernelSession:
         """
         if not JUPYTER_CLIENT_AVAILABLE:
             self._logger.error("jupyter_client import failed - AsyncKernelManager/AsyncKernelClient not available")
-            raise RuntimeError("jupyter_client is not installed or imports failed. Please install it to use kernel functionality.")
+            raise RuntimeError(
+                "jupyter_client is not installed or imports failed. Please install it to use kernel functionality."
+            )
 
         try:
             # Cancel any existing tasks before restarting (important for auto-restart after death)
@@ -92,21 +95,20 @@ class KernelSession:
             # Broadcast 'starting' status immediately to frontend
             # This provides immediate visual feedback that the kernel is launching
             from datetime import datetime, timezone
+
             starting_msg = {
-                'header': {
-                    'msg_id': f"starting_{self.kernel_id}_{datetime.now(timezone.utc).isoformat()}",
-                    'msg_type': 'status',
-                    'username': 'quench',
-                    'session': self.kernel_id,
-                    'date': datetime.now(timezone.utc),
-                    'version': '5.3'
+                "header": {
+                    "msg_id": f"starting_{self.kernel_id}_{datetime.now(timezone.utc).isoformat()}",
+                    "msg_type": "status",
+                    "username": "quench",
+                    "session": self.kernel_id,
+                    "date": datetime.now(timezone.utc),
+                    "version": "5.3",
                 },
-                'msg_type': 'status',
-                'content': {
-                    'execution_state': 'starting'
-                },
-                'metadata': {},
-                'buffers': []
+                "msg_type": "status",
+                "content": {"execution_state": "starting"},
+                "metadata": {},
+                "buffers": [],
             }
             await self.relay_queue.put((self.kernel_id, starting_msg))
             self._logger.debug(f"Broadcast 'starting' status for kernel {self.kernel_id[:8]}")
@@ -170,41 +172,39 @@ class KernelSession:
         self.listener_task = None
         self.monitor_task = None
 
-
     async def _send_cell_status(self, msg_id: str, status: str):
         """
         Send a cell status update message to the frontend.
-        
+
         Args:
             msg_id: The original execute request message ID
             status: One of 'queued', 'running', 'completed_ok', 'completed_error'
         """
         from datetime import datetime, timezone
+
         status_message = {
-            'header': {
-                'msg_id': f"status_{msg_id}_{status}_{datetime.now(timezone.utc).isoformat()}",
-                'msg_type': 'quench_cell_status',
-                'username': 'quench',
-                'session': self.kernel_id,
-                'date': datetime.now(timezone.utc),
-                'version': '5.3'
+            "header": {
+                "msg_id": f"status_{msg_id}_{status}_{datetime.now(timezone.utc).isoformat()}",
+                "msg_type": "quench_cell_status",
+                "username": "quench",
+                "session": self.kernel_id,
+                "date": datetime.now(timezone.utc),
+                "version": "5.3",
             },
-            'msg_type': 'quench_cell_status',
-            'parent_header': {
-                'msg_id': msg_id,
-                'msg_type': 'execute_request',
-                'username': 'quench',
-                'session': self.kernel_id,
-                'date': datetime.now(timezone.utc),
-                'version': '5.3'
+            "msg_type": "quench_cell_status",
+            "parent_header": {
+                "msg_id": msg_id,
+                "msg_type": "execute_request",
+                "username": "quench",
+                "session": self.kernel_id,
+                "date": datetime.now(timezone.utc),
+                "version": "5.3",
             },
-            'content': {
-                'status': status
-            },
-            'metadata': {},
-            'buffers': []
+            "content": {"status": status},
+            "metadata": {},
+            "buffers": [],
         }
-        
+
         # Add to cache and relay
         self.output_cache.append(status_message)
         await self.relay_queue.put((self.kernel_id, status_message))
@@ -231,22 +231,20 @@ class KernelSession:
 
                 # Send notification to frontend and Neovim
                 from datetime import datetime, timezone
+
                 auto_restart_msg = {
-                    'header': {
-                        'msg_id': f"auto_restart_{self.kernel_id}_{datetime.now(timezone.utc).isoformat()}",
-                        'msg_type': 'kernel_auto_restarted',
-                        'username': 'quench',
-                        'session': self.kernel_id,
-                        'date': datetime.now(timezone.utc),
-                        'version': '5.3'
+                    "header": {
+                        "msg_id": f"auto_restart_{self.kernel_id}_{datetime.now(timezone.utc).isoformat()}",
+                        "msg_type": "kernel_auto_restarted",
+                        "username": "quench",
+                        "session": self.kernel_id,
+                        "date": datetime.now(timezone.utc),
+                        "version": "5.3",
                     },
-                    'msg_type': 'kernel_auto_restarted',
-                    'content': {
-                        'status': 'ok',
-                        'reason': 'Auto-restarted after kernel death'
-                    },
-                    'metadata': {},
-                    'buffers': []
+                    "msg_type": "kernel_auto_restarted",
+                    "content": {"status": "ok", "reason": "Auto-restarted after kernel death"},
+                    "metadata": {},
+                    "buffers": [],
                 }
 
                 # Add to cache and relay
@@ -269,58 +267,56 @@ class KernelSession:
             # First, get the msg_id that will be generated
             msg_id = self.client.execute(code)
             self._logger.debug(f"Executed code in kernel {self.kernel_id[:8]}, msg_id: {msg_id}")
-            
+
             # Create a synthetic execute_input message for the frontend using the actual execute request ID
             # This ensures the frontend has a cell to attach output to, using the same ID that output messages will reference
             from datetime import datetime, timezone
+
             execute_input_msg = {
-                'header': {
-                    'msg_id': f"synthetic_{msg_id}",  # Use a different ID for the execute_input message itself
-                    'msg_type': 'execute_input',
-                    'username': 'quench',
-                    'session': self.kernel_id,
-                    'date': datetime.now(timezone.utc),
-                    'version': '5.3'
+                "header": {
+                    "msg_id": f"synthetic_{msg_id}",  # Use a different ID for the execute_input message itself
+                    "msg_type": "execute_input",
+                    "username": "quench",
+                    "session": self.kernel_id,
+                    "date": datetime.now(timezone.utc),
+                    "version": "5.3",
                 },
-                'msg_id': f"synthetic_{msg_id}",
-                'msg_type': 'execute_input',
-                'parent_header': {
-                    'msg_id': msg_id,  # This is the key - output messages will reference this ID
-                    'msg_type': 'execute_request',
-                    'username': 'quench',
-                    'session': self.kernel_id,
-                    'date': datetime.now(timezone.utc),
-                    'version': '5.3'
+                "msg_id": f"synthetic_{msg_id}",
+                "msg_type": "execute_input",
+                "parent_header": {
+                    "msg_id": msg_id,  # This is the key - output messages will reference this ID
+                    "msg_type": "execute_request",
+                    "username": "quench",
+                    "session": self.kernel_id,
+                    "date": datetime.now(timezone.utc),
+                    "version": "5.3",
                 },
-                'metadata': {},
-                'content': {
-                    'code': code,
-                    'execution_count': None
-                },
-                'buffers': []
+                "metadata": {},
+                "content": {"code": code, "execution_count": None},
+                "buffers": [],
             }
-            
+
             self._logger.debug(f"Creating synthetic execute_input with parent_msg_id: {msg_id}")
-            
+
             # Add to cache and relay immediately
             self.output_cache.append(execute_input_msg)
             await self.relay_queue.put((self.kernel_id, execute_input_msg))
             self._logger.debug(f"Created synthetic execute_input message for kernel {self.kernel_id[:8]}")
-            
+
             # Now send status messages after the cell has been created
             # Track this execution and send queued status
-            self.pending_executions[msg_id] = 'queued'
-            await self._send_cell_status(msg_id, 'queued')
-            
+            self.pending_executions[msg_id] = "queued"
+            await self._send_cell_status(msg_id, "queued")
+
             # Wait for kernel to be available if it's busy
             while self.is_busy:
                 await asyncio.sleep(0.1)
-            
+
             # Send running status when execution begins
             if msg_id in self.pending_executions:
-                self.pending_executions[msg_id] = 'running'
-                await self._send_cell_status(msg_id, 'running')
-            
+                self.pending_executions[msg_id] = "running"
+                await self._send_cell_status(msg_id, "running")
+
             return msg_id
         except Exception as e:
             self._logger.error(f"Error executing code in kernel {self.kernel_id[:8]}: {e}")
@@ -332,7 +328,7 @@ class KernelSession:
         """
         if not self.km:
             raise RuntimeError("Kernel manager is not available. Call start() first.")
-        
+
         try:
             await self.km.interrupt_kernel()
             self._logger.info(f"Interrupted kernel {self.kernel_id[:8]}")
@@ -347,10 +343,10 @@ class KernelSession:
         """
         if not self.km:
             raise RuntimeError("Kernel manager is not available. Call start() first.")
-        
+
         try:
             self._logger.info(f"Restarting kernel {self.kernel_id[:8]}")
-            
+
             # Restart the kernel
             await self.km.restart_kernel()
 
@@ -359,6 +355,7 @@ class KernelSession:
 
             # Create a custom message for the frontend
             from datetime import datetime, timezone
+
             restart_message = {
                 "header": {
                     "msg_id": f"restart_{self.kernel_id}_{datetime.now(timezone.utc).isoformat()}",
@@ -366,19 +363,19 @@ class KernelSession:
                     "username": "quench",
                     "session": self.kernel_id,
                     "date": datetime.now(timezone.utc),
-                    "version": "5.3"
+                    "version": "5.3",
                 },
                 "msg_type": "kernel_restarted",
                 "content": {"status": "ok"},
                 "metadata": {},
-                "buffers": []
+                "buffers": [],
             }
-            
+
             # Add the message to the relay queue
             await self.relay_queue.put((self.kernel_id, restart_message))
-            
+
             self._logger.info(f"Kernel {self.kernel_id[:8]} restarted successfully")
-            
+
         except Exception as e:
             self._logger.error(f"Error restarting kernel {self.kernel_id[:8]}: {e}")
             raise
@@ -393,41 +390,41 @@ class KernelSession:
 
         try:
             self._logger.info(f"Started IOPub listener for kernel {self.kernel_id[:8]}")
-            
+
             while True:
                 try:
                     # Wait for messages from the IOPub channel
                     message = await self.client.get_iopub_msg(timeout=1.0)
-                    
+
                     # Skip execute_input messages since we create our own synthetic ones
                     # This prevents duplicate cells in the frontend
-                    if message.get('msg_type') == 'execute_input':
+                    if message.get("msg_type") == "execute_input":
                         self._logger.debug(f"Skipping real execute_input message from kernel {self.kernel_id[:8]}")
                         continue
-                    
+
                     # Handle kernel status messages to track busy/idle state
-                    if message.get('msg_type') == 'status':
-                        execution_state = message.get('content', {}).get('execution_state')
-                        if execution_state == 'busy':
+                    if message.get("msg_type") == "status":
+                        execution_state = message.get("content", {}).get("execution_state")
+                        if execution_state == "busy":
                             self.is_busy = True
                             self._logger.debug(f"Kernel {self.kernel_id[:8]} is now busy")
-                        elif execution_state == 'idle':
+                        elif execution_state == "idle":
                             self.is_busy = False
                             self._logger.debug(f"Kernel {self.kernel_id[:8]} is now idle")
-                            
+
                             # Check if this corresponds to a completed execution
-                            parent_msg_id = message.get('parent_header', {}).get('msg_id')
+                            parent_msg_id = message.get("parent_header", {}).get("msg_id")
                             if parent_msg_id and parent_msg_id in self.pending_executions:
                                 # Assume successful completion unless we've seen an error
                                 # We'll handle errors in the error message handler
-                                await self._send_cell_status(parent_msg_id, 'completed_ok')
+                                await self._send_cell_status(parent_msg_id, "completed_ok")
                                 del self.pending_executions[parent_msg_id]
-                    
+
                     # Handle error messages to mark cells as completed with error
-                    elif message.get('msg_type') == 'error':
-                        parent_msg_id = message.get('parent_header', {}).get('msg_id')
+                    elif message.get("msg_type") == "error":
+                        parent_msg_id = message.get("parent_header", {}).get("msg_id")
                         if parent_msg_id and parent_msg_id in self.pending_executions:
-                            await self._send_cell_status(parent_msg_id, 'completed_error')
+                            await self._send_cell_status(parent_msg_id, "completed_error")
                             del self.pending_executions[parent_msg_id]
 
                     # Cache coalescing: merge consecutive stream messages in the cache
@@ -435,16 +432,19 @@ class KernelSession:
                     # the relay queue for real-time feedback.
                     should_append_to_cache = True
 
-                    if message.get('msg_type') == 'stream' and self.output_cache:
+                    if message.get("msg_type") == "stream" and self.output_cache:
                         last_msg = self.output_cache[-1]
 
                         # Check if compatible for merging: same msg_type, stream name, and parent msg_id
-                        if (last_msg.get('msg_type') == 'stream' and
-                            last_msg.get('content', {}).get('name') == message.get('content', {}).get('name') and
-                            last_msg.get('parent_header', {}).get('msg_id') == message.get('parent_header', {}).get('msg_id')):
+                        if (
+                            last_msg.get("msg_type") == "stream"
+                            and last_msg.get("content", {}).get("name") == message.get("content", {}).get("name")
+                            and last_msg.get("parent_header", {}).get("msg_id")
+                            == message.get("parent_header", {}).get("msg_id")
+                        ):
 
                             # Merge text into the existing cache entry
-                            last_msg['content']['text'] += message['content']['text']
+                            last_msg["content"]["text"] += message["content"]["text"]
                             should_append_to_cache = False
                             self._logger.debug(f"Coalesced stream message into cache for kernel {self.kernel_id[:8]}")
 
@@ -454,8 +454,10 @@ class KernelSession:
                     # Always forward the original granular message to relay queue
                     # for real-time streaming feedback to connected clients
                     await self.relay_queue.put((self.kernel_id, message))
-                    
-                    self._logger.debug(f"Relayed message from kernel {self.kernel_id[:8]}: {message.get('msg_type', 'unknown')}")
+
+                    self._logger.debug(
+                        f"Relayed message from kernel {self.kernel_id[:8]}: {message.get('msg_type', 'unknown')}"
+                    )
 
                 except asyncio.TimeoutError:
                     # Timeout is expected, continue listening
@@ -463,16 +465,19 @@ class KernelSession:
                 except Exception as e:
                     # Log other errors but continue listening
                     error_msg = str(e) if e else "Unknown error"
-                    
+
                     # Don't spam logs with Empty exceptions - they're normal timeouts
-                    if "Empty" not in error_msg and e.__class__.__name__ != 'Empty':
-                        self._logger.warning(f"Error receiving IOPub message from kernel {self.kernel_id[:8]}: {error_msg}")
-                        
+                    if "Empty" not in error_msg and e.__class__.__name__ != "Empty":
+                        self._logger.warning(
+                            f"Error receiving IOPub message from kernel {self.kernel_id[:8]}: {error_msg}"
+                        )
+
                         # Add more detailed error info for non-Empty errors
-                        if hasattr(e, '__class__'):
+                        if hasattr(e, "__class__"):
                             self._logger.debug(f"Exception type: {e.__class__.__name__}")
-                        
+
                         import traceback
+
                         self._logger.debug(f"Exception traceback: {traceback.format_exc()}")
                     continue
 
@@ -499,18 +504,16 @@ class KernelSession:
 
                     # Notify Frontend
                     from datetime import datetime, timezone
+
                     death_msg = {
-                        'header': {
-                            'msg_id': f"death_{self.kernel_id}",
-                            'msg_type': 'kernel_died',
-                            'date': datetime.now(timezone.utc),
-                            'version': '5.3'
+                        "header": {
+                            "msg_id": f"death_{self.kernel_id}",
+                            "msg_type": "kernel_died",
+                            "date": datetime.now(timezone.utc),
+                            "version": "5.3",
                         },
-                        'msg_type': 'kernel_died',
-                        'content': {
-                            'reason': 'Process crashed or was terminated by OS',
-                            'status': 'dead'
-                        }
+                        "msg_type": "kernel_died",
+                        "content": {"reason": "Process crashed or was terminated by OS", "status": "dead"},
                     }
                     await self.relay_queue.put((self.kernel_id, death_msg))
 
@@ -552,7 +555,9 @@ class KernelSessionManager:
             self._logger = logging.getLogger("quench.kernel_manager")
             KernelSessionManager._initialized = True
 
-    async def start_session(self, relay_queue: asyncio.Queue, buffer_name: str = None, kernel_name: str = None) -> KernelSession:
+    async def start_session(
+        self, relay_queue: asyncio.Queue, buffer_name: str = None, kernel_name: str = None
+    ) -> KernelSession:
         """
         Starts a new kernel session without attaching it to a buffer.
 
@@ -608,20 +613,20 @@ class KernelSessionManager:
         choices = []
         running_kernels = []
         for kernel_id, session in self.sessions.items():
-            running_kernels.append({
-                'display_name': f"Running: {session.kernel_name} ({kernel_id[:8]})",
-                'value': kernel_id,
-                'is_running': True
-            })
+            running_kernels.append(
+                {
+                    "display_name": f"Running: {session.kernel_name} ({kernel_id[:8]})",
+                    "value": kernel_id,
+                    "is_running": True,
+                }
+            )
 
         new_kernels = []
         kernelspecs = self.discover_kernelspecs()
         for spec in kernelspecs:
-            new_kernels.append({
-                'display_name': f"New: {spec['display_name']}",
-                'value': spec['name'],
-                'is_running': False
-            })
+            new_kernels.append(
+                {"display_name": f"New: {spec['display_name']}", "value": spec["name"], "is_running": False}
+            )
 
         if running_first:
             choices.extend(running_kernels)
@@ -632,7 +637,9 @@ class KernelSessionManager:
 
         return choices
 
-    async def get_or_create_session(self, bnum: int, relay_queue: asyncio.Queue, buffer_name: str = None, kernel_name: str = None) -> KernelSession:
+    async def get_or_create_session(
+        self, bnum: int, relay_queue: asyncio.Queue, buffer_name: str = None, kernel_name: str = None
+    ) -> KernelSession:
         """
         Get an existing session for a buffer or create a new one.
 
@@ -674,7 +681,7 @@ class KernelSessionManager:
         session = self.sessions[kernel_id]
         session.associated_buffers.add(bnum)
         self.buffer_to_kernel_map[bnum] = kernel_id
-        
+
         self._logger.info(f"Attached buffer {bnum} to session {kernel_id[:8]}")
 
     async def get_session_for_buffer(self, bnum: int) -> Optional[KernelSession]:
@@ -702,10 +709,10 @@ class KernelSessionManager:
             return
 
         self._logger.info(f"Shutting down {len(self.sessions)} sessions")
-        
+
         # Shutdown all sessions concurrently
         shutdown_tasks = [session.shutdown() for session in self.sessions.values()]
-        
+
         try:
             await asyncio.gather(*shutdown_tasks, return_exceptions=True)
         except Exception as e:
@@ -726,15 +733,15 @@ class KernelSessionManager:
         result = {}
         for kernel_id, session in self.sessions.items():
             result[kernel_id] = {
-                'kernel_id': kernel_id,
-                'name': session.buffer_name,
-                'kernel_name': session.kernel_name,
-                'python_executable': session.python_executable,
-                'short_id': kernel_id[:8],
-                'created_at': session.created_at.isoformat() if hasattr(session, 'created_at') else None,
-                'associated_buffers': list(session.associated_buffers),
-                'output_cache_size': len(session.output_cache),
-                'is_alive': session.listener_task is not None and not session.listener_task.done()
+                "kernel_id": kernel_id,
+                "name": session.buffer_name,
+                "kernel_name": session.kernel_name,
+                "python_executable": session.python_executable,
+                "short_id": kernel_id[:8],
+                "created_at": session.created_at.isoformat() if hasattr(session, "created_at") else None,
+                "associated_buffers": list(session.associated_buffers),
+                "output_cache_size": len(session.output_cache),
+                "is_alive": session.listener_task is not None and not session.listener_task.done(),
             }
         return result
 
@@ -749,36 +756,33 @@ class KernelSessionManager:
                 - argv: Command line arguments for starting the kernel
         """
         kernelspecs = []
-        
+
         try:
             # Use jupyter_client to discover kernels instead of subprocess
             from jupyter_client.kernelspec import KernelSpecManager
+
             ksm = KernelSpecManager()
             available_kernels = ksm.find_kernel_specs()
-            
+
             # Get kernel specs for each available kernel
             for kernel_name in available_kernels.keys():
                 try:
                     spec = ksm.get_kernel_spec(kernel_name)
-                    kernelspecs.append({
-                        'name': kernel_name,
-                        'display_name': spec.display_name,
-                        'argv': spec.argv
-                    })
+                    kernelspecs.append({"name": kernel_name, "display_name": spec.display_name, "argv": spec.argv})
                 except Exception as e:
                     self._logger.warning(f"Failed to get spec for kernel {kernel_name}: {e}")
                     continue
-        
+
         except Exception as e:
             self._logger.error(f"Failed to discover kernels using jupyter_client: {e}")
             self._logger.error("Please ensure jupyter_client is installed: pip install jupyter_client")
             raise
-        
+
         self._logger.info(f"Discovered {len(kernelspecs)} kernel specifications")
-        
+
         # If no kernels found, log a helpful message
         if not kernelspecs:
             self._logger.warning("No Jupyter kernel specifications found. Make sure ipykernel is installed.")
             self._logger.info("To install: pip install ipykernel && python -m ipykernel install --user")
-        
+
         return kernelspecs

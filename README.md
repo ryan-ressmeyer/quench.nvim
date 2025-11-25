@@ -1,7 +1,7 @@
 # 🔥 Quench.nvim 💧
 
 [![Neovim](https://img.shields.io/badge/Neovim-0.8+-green.svg?style=flat-square&logo=neovim)](https://neovim.io)
-[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg?style=flat-square&logo=python)](https://www.python.org)
+[![Python](https://img.shields.io/badge/Python-3.9+-blue.svg?style=flat-square&logo=python)](https://www.python.org)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 
 **Interactive Python development in Neovim using cell-based execution.**
@@ -21,7 +21,7 @@ Quench brings Visual Studio Code's Jupyter-like cell execution workflow to Neovi
 
 **Required:**
   * Neovim >= 0.8.0
-  * Python >= 3.8
+  * Python >= 3.9
   * `pynvim >= 0.4.3`
   * `jupyter-client >= 7.0.0`
 

@@ -22,6 +22,7 @@ Expected State Transitions:
 print("Testing Idle → Busy → Idle")
 print("Watch the indicator: Blue → Green (pulsing) → Blue")
 import time
+
 for i in range(3):
     print(f"Working... {i+1}/3")
     time.sleep(1)
@@ -31,6 +32,7 @@ print("✓ Completed - Should return to Idle (Blue)")
 print("Testing longer Busy state (Green pulsing hexagon)")
 print("The indicator should pulse green for ~5 seconds")
 import time
+
 total = 0
 for i in range(5):
     total += i
@@ -74,9 +76,11 @@ print("  3. Running next cell auto-restarts kernel")
 print("  4. Frontend shows '🔄 Kernel Auto-Restarted' notification")
 print("\nCrashing kernel in 3 seconds...")
 import time
+
 time.sleep(3)
 import os
 import signal
+
 os.kill(os.getpid(), signal.SIGKILL)  # Force crash
 
 # %% Cell 6: Test auto-restart (run AFTER Cell 5 crashes)
@@ -97,6 +101,7 @@ print("Indicator should have pulsed green briefly")
 print("Testing Busy state with simulated progress bar")
 print("Watch the green pulsing indicator during execution:")
 import time
+
 steps = 10
 for i in range(steps):
     progress = (i + 1) / steps * 100

@@ -42,7 +42,7 @@ def status_command_impl(plugin):
         if sessions:
             status_msg += "\nActive Sessions:\n"
             for kernel_id, info in sessions.items():
-                buffers = ', '.join(map(str, info['associated_buffers']))
+                buffers = ", ".join(map(str, info["associated_buffers"]))
                 status_msg += f"  {kernel_id[:8]}: buffers [{buffers}], cache size: {info['output_cache_size']}\n"
 
         plugin.nvim.out_write(status_msg)
@@ -50,7 +50,6 @@ def status_command_impl(plugin):
     except Exception as e:
         plugin._logger.error(f"Error in QuenchStatus: {e}")
         plugin.nvim.err_write(f"Status error: {e}\n")
-
 
 
 def debug_command_impl(plugin):
@@ -79,12 +78,14 @@ def debug_command_impl(plugin):
         # Test dependencies
         try:
             import jupyter_client
+
             plugin.nvim.out_write("✓ jupyter_client available\n")
         except ImportError:
             plugin.nvim.out_write("✗ jupyter_client not available\n")
 
         try:
             import aiohttp
+
             plugin.nvim.out_write("✓ aiohttp available\n")
         except ImportError:
             plugin.nvim.out_write("✗ aiohttp not available\n")
@@ -92,6 +93,7 @@ def debug_command_impl(plugin):
         # Test async functionality
         try:
             import asyncio
+
             plugin.nvim.out_write("✓ asyncio available\n")
             try:
                 loop = asyncio.get_event_loop()

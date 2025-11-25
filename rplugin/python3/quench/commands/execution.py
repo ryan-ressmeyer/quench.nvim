@@ -12,12 +12,7 @@ These are implementation functions only - decorators are in the main plugin clas
 """
 
 from ..core.config import get_cell_delimiter
-from ..core.cell_parser import (
-    extract_cell,
-    extract_cells_above,
-    extract_cells_below,
-    extract_all_cells
-)
+from ..core.cell_parser import extract_cell, extract_cells_above, extract_cells_below, extract_all_cells
 from ..utils.notifications import notify_user, select_from_choices_sync
 
 
@@ -32,7 +27,7 @@ def _prepare_buffer_data(plugin):
         return current_bnum, current_line, lines
     except Exception as e:
         plugin._logger.error(f"Error getting buffer data: {e}")
-        notify_user(plugin.nvim, f"Error accessing buffer: {e}", level='error')
+        notify_user(plugin.nvim, f"Error accessing buffer: {e}", level="error")
         return None, None, None
 
 
@@ -63,7 +58,7 @@ def run_cell_impl(plugin):
 
     except Exception as e:
         plugin._logger.error(f"Error extracting cell code: {e}")
-        notify_user(plugin.nvim, f"Error extracting cell: {e}", level='error')
+        notify_user(plugin.nvim, f"Error extracting cell: {e}", level="error")
         return
 
     # Get or select kernel synchronously
@@ -99,7 +94,7 @@ def run_cell_advance_impl(plugin):
 
     except Exception as e:
         plugin._logger.error(f"Error extracting cell code: {e}")
-        notify_user(plugin.nvim, f"Error extracting cell: {e}", level='error')
+        notify_user(plugin.nvim, f"Error extracting cell: {e}", level="error")
         return
 
     # Immediately advance the cursor
@@ -139,13 +134,13 @@ def run_selection_impl(plugin, range_info):
         else:
             # Range provided (e.g., from command line)
             start_line, end_line = range_info
-            selected_lines = plugin.nvim.current.buffer[start_line-1:end_line]
+            selected_lines = plugin.nvim.current.buffer[start_line - 1 : end_line]
 
         if not selected_lines:
             notify_user(plugin.nvim, "No selection found")
             return
 
-        selected_code = '\n'.join(selected_lines)
+        selected_code = "\n".join(selected_lines)
         if not selected_code.strip():
             notify_user(plugin.nvim, "Selected text is empty")
             return
@@ -155,7 +150,7 @@ def run_selection_impl(plugin, range_info):
 
     except Exception as e:
         plugin._logger.error(f"Error extracting selection: {e}")
-        notify_user(plugin.nvim, f"Error extracting selection: {e}", level='error')
+        notify_user(plugin.nvim, f"Error extracting selection: {e}", level="error")
         return
 
     # Get or select kernel synchronously
@@ -190,7 +185,7 @@ def run_line_impl(plugin):
 
     except Exception as e:
         plugin._logger.error(f"Error getting line content: {e}")
-        notify_user(plugin.nvim, f"Error getting line content: {e}", level='error')
+        notify_user(plugin.nvim, f"Error getting line content: {e}", level="error")
         return
 
     # Get or select kernel synchronously
@@ -223,13 +218,13 @@ def run_above_impl(plugin):
             return
 
         # Combine all cells above into one execution
-        combined_code = '\n\n'.join(cells_above)
+        combined_code = "\n\n".join(cells_above)
         plugin._logger.debug(f"Combined code from {len(cells_above)} cells: {len(combined_code)} characters")
         notify_user(plugin.nvim, f"Quench: Executing {len(cells_above)} cells above current position")
 
     except Exception as e:
         plugin._logger.error(f"Error extracting cells above: {e}")
-        notify_user(plugin.nvim, f"Error extracting cells above: {e}", level='error')
+        notify_user(plugin.nvim, f"Error extracting cells above: {e}", level="error")
         return
 
     # Get or select kernel synchronously
@@ -262,13 +257,13 @@ def run_below_impl(plugin):
             return
 
         # Combine all cells below into one execution
-        combined_code = '\n\n'.join(cells_below)
+        combined_code = "\n\n".join(cells_below)
         plugin._logger.debug(f"Combined code from {len(cells_below)} cells: {len(combined_code)} characters")
         notify_user(plugin.nvim, f"Quench: Executing {len(cells_below)} cells below current position")
 
     except Exception as e:
         plugin._logger.error(f"Error extracting cells below: {e}")
-        notify_user(plugin.nvim, f"Error extracting cells below: {e}", level='error')
+        notify_user(plugin.nvim, f"Error extracting cells below: {e}", level="error")
         return
 
     # Get or select kernel synchronously
@@ -301,13 +296,13 @@ def run_all_impl(plugin):
             return
 
         # Combine all cells into one execution
-        combined_code = '\n\n'.join(all_cells)
+        combined_code = "\n\n".join(all_cells)
         plugin._logger.debug(f"Combined code from {len(all_cells)} cells: {len(combined_code)} characters")
         notify_user(plugin.nvim, f"Quench: Executing all {len(all_cells)} cells in buffer")
 
     except Exception as e:
         plugin._logger.error(f"Error extracting all cells: {e}")
-        notify_user(plugin.nvim, f"Error extracting all cells: {e}", level='error')
+        notify_user(plugin.nvim, f"Error extracting all cells: {e}", level="error")
         return
 
     # Get or select kernel synchronously

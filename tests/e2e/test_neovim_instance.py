@@ -4,6 +4,7 @@ TestNeovimInstance - Managed Neovim instance for end-to-end testing.
 This module provides a TestNeovimInstance class that manages a real Neovim process
 for testing Quench plugin functionality in a realistic environment.
 """
+
 import asyncio
 import subprocess
 import tempfile
@@ -53,7 +54,7 @@ class TestNeovimInstance:
 
     def _record_log_position(self) -> None:
         """Record the current position in the Quench log file."""
-        log_file = Path('/tmp/quench.log')
+        log_file = Path("/tmp/quench.log")
         if log_file.exists():
             self.log_start_position = log_file.stat().st_size
             logger.info(f"Recorded log position: {self.log_start_position}")
@@ -90,31 +91,26 @@ class TestNeovimInstance:
 
         # Consolidate setup commands to reduce total count
         nvim_cmd = [
-            'nvim',
-            '--headless',
-            '-u', self.config_file or str(cwd / 'tests' / 'e2e' / 'test_nvim_config.lua'),
+            "nvim",
+            "--headless",
+            "-u",
+            self.config_file or str(cwd / "tests" / "e2e" / "test_nvim_config.lua"),
             self.test_file_path,
-            '-c', f'set rtp+={cwd} | set rtp+={cwd}/rplugin | UpdateRemotePlugins | sleep 3',
+            "-c",
+            f"set rtp+={cwd} | set rtp+={cwd}/rplugin | UpdateRemotePlugins | sleep 3",
         ]
 
         # Add the essential user commands only
         for command in self.commands_to_execute:
-            nvim_cmd.extend(['-c', command])
+            nvim_cmd.extend(["-c", command])
 
         # Add final commands
-        nvim_cmd.extend([
-            '-c', 'messages | qall!'
-        ])
+        nvim_cmd.extend(["-c", "messages | qall!"])
 
         logger.info(f"Executing Neovim command: {' '.join(nvim_cmd)}")
 
         try:
-            self.process = subprocess.Popen(
-                nvim_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
+            self.process = subprocess.Popen(nvim_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
             self.stdout, self.stderr = self.process.communicate(timeout=timeout)
             return_code = self.process.returncode
@@ -124,10 +120,10 @@ class TestNeovimInstance:
             logger.info(f"STDERR length: {len(self.stderr)} chars")
 
             return {
-                'return_code': return_code,
-                'stdout': self.stdout,
-                'stderr': self.stderr,
-                'success': return_code == 0
+                "return_code": return_code,
+                "stdout": self.stdout,
+                "stderr": self.stderr,
+                "success": return_code == 0,
             }
 
         except subprocess.TimeoutExpired:
@@ -138,11 +134,11 @@ class TestNeovimInstance:
 
             # For test purposes, timeout might not mean failure if we got useful output
             return {
-                'return_code': -1,  # Indicate timeout
-                'stdout': self.stdout,
-                'stderr': self.stderr,
-                'success': len(self.stdout) > 0 or len(self.stderr) > 0,  # Consider success if we got output
-                'timeout': True
+                "return_code": -1,  # Indicate timeout
+                "stdout": self.stdout,
+                "stderr": self.stderr,
+                "success": len(self.stdout) > 0 or len(self.stderr) > 0,  # Consider success if we got output
+                "timeout": True,
             }
 
     async def wait_for_completion(self) -> Dict[str, Any]:
@@ -170,7 +166,7 @@ class TestNeovimInstance:
 
         # Create test file
         test_file = Path(self.temp_dir.name) / filename
-        test_file.write_text('\n'.join(content))
+        test_file.write_text("\n".join(content))
 
         self.test_file_path = str(test_file)
         logger.info(f"Created test file: {test_file}")
@@ -187,10 +183,7 @@ class TestNeovimInstance:
         self.add_command(command)
         logger.info(f"Queued command: {command}")
 
-    async def wait_for_message(self,
-                              expected_pattern: str,
-                              timeout: int = 30,
-                              check_interval: float = 0.5) -> bool:
+    async def wait_for_message(self, expected_pattern: str, timeout: int = 30, check_interval: float = 0.5) -> bool:
         """
         Wait for a specific message pattern to appear in Neovim messages.
 
@@ -225,7 +218,7 @@ class TestNeovimInstance:
             List of message lines from stdout
         """
         if self.stdout:
-            return [line.strip() for line in self.stdout.split('\n') if line.strip()]
+            return [line.strip() for line in self.stdout.split("\n") if line.strip()]
         return []
 
     def get_all_messages(self) -> List[str]:
@@ -237,9 +230,9 @@ class TestNeovimInstance:
         """
         messages = []
         if self.stdout:
-            messages.extend([line.strip() for line in self.stdout.split('\n') if line.strip()])
+            messages.extend([line.strip() for line in self.stdout.split("\n") if line.strip()])
         if self.stderr:
-            messages.extend([line.strip() for line in self.stderr.split('\n') if line.strip()])
+            messages.extend([line.strip() for line in self.stderr.split("\n") if line.strip()])
         return messages
 
     def get_error_messages(self) -> List[str]:
@@ -255,7 +248,7 @@ class TestNeovimInstance:
         error_messages = []
         for msg in messages:
             msg_lower = msg.lower()
-            if any(keyword in msg_lower for keyword in ['error', 'failed', 'exception', 'traceback']):
+            if any(keyword in msg_lower for keyword in ["error", "failed", "exception", "traceback"]):
                 error_messages.append(msg)
 
         return error_messages
@@ -267,14 +260,14 @@ class TestNeovimInstance:
         Returns:
             New log content as string
         """
-        log_file = Path('/tmp/quench.log')
+        log_file = Path("/tmp/quench.log")
 
         if not log_file.exists():
             logger.warning("Quench log file does not exist")
             return ""
 
         try:
-            with open(log_file, 'r') as f:
+            with open(log_file, "r") as f:
                 f.seek(self.log_start_position)
                 new_content = f.read()
                 logger.info(f"Read {len(new_content)} bytes from log file")
@@ -290,10 +283,7 @@ class TestNeovimInstance:
         Returns:
             Dictionary with 'stdout' and 'stderr' keys
         """
-        return {
-            'stdout': self.stdout,
-            'stderr': self.stderr
-        }
+        return {"stdout": self.stdout, "stderr": self.stderr}
 
     async def cleanup(self) -> None:
         """
@@ -348,14 +338,14 @@ class TestNeovimInstance:
             - 'summary': string summary of all issues found
         """
         result = {
-            'has_errors': False,
-            'has_warnings': False,
-            'nvim_errors': [],
-            'nvim_warnings': [],
-            'log_errors': [],
-            'log_warnings': [],
-            'stderr_errors': [],
-            'summary': ''
+            "has_errors": False,
+            "has_warnings": False,
+            "nvim_errors": [],
+            "nvim_warnings": [],
+            "log_errors": [],
+            "log_warnings": [],
+            "stderr_errors": [],
+            "summary": "",
         }
 
         # Check Neovim messages for errors and warnings
@@ -364,66 +354,68 @@ class TestNeovimInstance:
         for msg in nvim_messages:
             msg_lower = msg.lower()
             # Skip certain benign messages that contain "error" but aren't actual errors
-            if ('error detected while processing command line:' in msg_lower and
-                not any(serious in msg_lower for serious in ['exception', 'traceback', 'failed to'])):
+            if "error detected while processing command line:" in msg_lower and not any(
+                serious in msg_lower for serious in ["exception", "traceback", "failed to"]
+            ):
                 continue  # Skip command line processing messages
 
-            if any(keyword in msg_lower for keyword in ['exception', 'traceback', 'failed to']):
-                result['nvim_errors'].append(msg)
-                result['has_errors'] = True
-            elif any(keyword in msg_lower for keyword in ['warning', 'warn']):
-                result['nvim_warnings'].append(msg)
-                result['has_warnings'] = True
+            if any(keyword in msg_lower for keyword in ["exception", "traceback", "failed to"]):
+                result["nvim_errors"].append(msg)
+                result["has_errors"] = True
+            elif any(keyword in msg_lower for keyword in ["warning", "warn"]):
+                result["nvim_warnings"].append(msg)
+                result["has_warnings"] = True
 
         # Check quench.log for errors and warnings
         log_content = self.get_log_tail()
         if log_content:
-            log_lines = log_content.split('\n')
+            log_lines = log_content.split("\n")
             for line in log_lines:
                 line_lower = line.lower()
                 # Skip benign address already in use errors (port conflicts during testing)
-                if 'address already in use' in line_lower:
+                if "address already in use" in line_lower:
                     continue
 
-                if any(keyword in line_lower for keyword in ['error', 'exception', 'traceback', 'failed']):
-                    result['log_errors'].append(line)
-                    result['has_errors'] = True
-                elif any(keyword in line_lower for keyword in ['warning', 'warn']):
-                    result['log_warnings'].append(line)
-                    result['has_warnings'] = True
+                if any(keyword in line_lower for keyword in ["error", "exception", "traceback", "failed"]):
+                    result["log_errors"].append(line)
+                    result["has_errors"] = True
+                elif any(keyword in line_lower for keyword in ["warning", "warn"]):
+                    result["log_warnings"].append(line)
+                    result["has_warnings"] = True
 
         # Check process stderr for errors
         process_output = self.get_process_output()
-        stderr_lines = process_output['stderr'].split('\n') if process_output['stderr'] else []
+        stderr_lines = process_output["stderr"].split("\n") if process_output["stderr"] else []
         for line in stderr_lines:
             if line.strip():  # Only non-empty lines
                 line_lower = line.lower()
                 # Skip benign "error detected while processing command line" messages
-                if ('error detected while processing command line:' in line_lower and
-                    not any(serious in line_lower for serious in ['exception', 'traceback', 'failed to'])):
+                if "error detected while processing command line:" in line_lower and not any(
+                    serious in line_lower for serious in ["exception", "traceback", "failed to"]
+                ):
                     continue
 
-                if any(keyword in line_lower for keyword in ['exception', 'traceback', 'failed to']):
-                    result['stderr_errors'].append(line)
-                    result['has_errors'] = True
+                if any(keyword in line_lower for keyword in ["exception", "traceback", "failed to"]):
+                    result["stderr_errors"].append(line)
+                    result["has_errors"] = True
 
         # Generate summary
         issues = []
-        if result['nvim_errors']:
+        if result["nvim_errors"]:
             issues.append(f"{len(result['nvim_errors'])} Neovim errors")
-        if result['nvim_warnings']:
+        if result["nvim_warnings"]:
             issues.append(f"{len(result['nvim_warnings'])} Neovim warnings")
-        if result['log_errors']:
+        if result["log_errors"]:
             issues.append(f"{len(result['log_errors'])} log errors")
-        if result['log_warnings']:
+        if result["log_warnings"]:
             issues.append(f"{len(result['log_warnings'])} log warnings")
-        if result['stderr_errors']:
+        if result["stderr_errors"]:
             issues.append(f"{len(result['stderr_errors'])} stderr errors")
 
         if issues:
-            result['summary'] = f"Found: {', '.join(issues)}"
+            result["summary"] = f"Found: {', '.join(issues)}"
         else:
-            result['summary'] = "No errors or warnings detected"
+            result["summary"] = "No errors or warnings detected"
 
         logger.info(f"Error detection result: {result['summary']}")
         return result

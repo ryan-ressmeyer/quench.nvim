@@ -4,6 +4,7 @@ Cell parsing utilities for the Quench plugin.
 This module contains functions for extracting and parsing Python code cells
 from Neovim buffers using cell delimiter patterns.
 """
+
 import re
 from typing import List, Tuple
 
@@ -58,7 +59,7 @@ def extract_cell(lines: List[str], lnum: int, delimiter_pattern: str) -> Tuple[s
     while cell_lines and not cell_lines[-1].strip():
         cell_lines.pop()
 
-    return '\n'.join(cell_lines), cell_start + 1, cell_end
+    return "\n".join(cell_lines), cell_start + 1, cell_end
 
 
 def extract_cells_above(lines: List[str], current_line: int, delimiter_pattern: str) -> List[str]:
@@ -116,7 +117,7 @@ def extract_cells_above(lines: List[str], current_line: int, delimiter_pattern: 
                 cell_lines.pop()
 
             if cell_lines:
-                cells.append('\n'.join(cell_lines))
+                cells.append("\n".join(cell_lines))
 
     return cells
 
@@ -176,7 +177,7 @@ def extract_cells_below(lines: List[str], current_line: int, delimiter_pattern: 
                 cell_lines.pop()
 
             if cell_lines:
-                cells.append('\n'.join(cell_lines))
+                cells.append("\n".join(cell_lines))
 
     return cells
 
@@ -216,6 +217,6 @@ def extract_all_cells(lines: List[str], delimiter_pattern: str) -> List[str]:
                 cell_lines.pop()
 
             if cell_lines:
-                cells.append('\n'.join(cell_lines))
+                cells.append("\n".join(cell_lines))
 
     return cells

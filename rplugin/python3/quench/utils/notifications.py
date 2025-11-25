@@ -4,10 +4,11 @@ User notification utilities for the Quench plugin.
 This module contains utility functions for notifying users and getting their input
 in a standardized way across the plugin.
 """
+
 from typing import List, Dict, Optional, Any
 
 
-def notify_user(nvim: Any, message: str, level: str = 'info') -> None:
+def notify_user(nvim: Any, message: str, level: str = "info") -> None:
     """
     Send a single-line notification to the user.
 
@@ -16,13 +17,13 @@ def notify_user(nvim: Any, message: str, level: str = 'info') -> None:
         message: The message to display to the user
         level: The notification level ('info' or 'error')
     """
-    if level == 'info':
-        nvim.out_write(message + '\n')
-    elif level == 'error':
-        nvim.err_write(message + '\n')
+    if level == "info":
+        nvim.out_write(message + "\n")
+    elif level == "error":
+        nvim.err_write(message + "\n")
 
 
-def notify_user_echo(nvim: Any, message: str, level: str = 'info') -> None:
+def notify_user_echo(nvim: Any, message: str, level: str = "info") -> None:
     """
     Send a notification without requiring Enter press.
 
@@ -33,11 +34,11 @@ def notify_user_echo(nvim: Any, message: str, level: str = 'info') -> None:
         message: The message to display to the user
         level: The notification level ('info' or 'error')
     """
-    nvim.command('redraw')
-    if level == 'error':
-        nvim.api.echo([[message, 'ErrorMsg']], False, {})
+    nvim.command("redraw")
+    if level == "error":
+        nvim.api.echo([[message, "ErrorMsg"]], False, {})
     else:
-        nvim.api.echo([[message, '']], False, {})
+        nvim.api.echo([[message, ""]], False, {})
 
 
 def notify_error_after_input(nvim: Any, message: str) -> None:
@@ -52,7 +53,7 @@ def notify_error_after_input(nvim: Any, message: str) -> None:
         nvim: The pynvim.Nvim instance for interacting with Neovim
         message: The error message to display
     """
-    nvim.command('redraw')
+    nvim.command("redraw")
     # Escape single quotes for vim command
     escaped = message.replace("'", "''")
     nvim.command(f"echohl ErrorMsg | echo '{escaped}' | echohl None")
@@ -71,14 +72,15 @@ def select_from_choices_sync(nvim: Any, choices: List[Dict[str, str]], prompt_ti
         The selected choice dictionary or None if cancelled/failed
     """
     import logging
-    logger = logging.getLogger('quench.notifications')
+
+    logger = logging.getLogger("quench.notifications")
 
     logger.info(f"select_from_choices_sync called with {len(choices) if choices else 0} choices")
     logger.info(f"prompt_title: {prompt_title}")
 
     if not choices:
         logger.error("No choices provided")
-        notify_user(nvim, "No choices available", level='error')
+        notify_user(nvim, "No choices available", level="error")
         return None
 
     if len(choices) == 1:
@@ -97,7 +99,8 @@ def select_from_choices_sync(nvim: Any, choices: List[Dict[str, str]], prompt_ti
     except Exception as e:
         # Log the specific error for debugging
         import logging
-        logger = logging.getLogger('quench.notifications')
+
+        logger = logging.getLogger("quench.notifications")
         logger.error(f"nvim.out_write failed: {e}")
 
         # Try alternative display method
@@ -115,19 +118,20 @@ def select_from_choices_sync(nvim: Any, choices: List[Dict[str, str]], prompt_ti
     if not display_success:
         # Last resort: try redraw and message
         try:
-            nvim.command('redraw')
+            nvim.command("redraw")
             nvim.command(f'echom "{prompt_title}"')
             for choice in display_choices:
                 nvim.command(f'echom "{choice}"')
         except Exception as e3:
             import logging
-            logger = logging.getLogger('quench.notifications')
+
+            logger = logging.getLogger("quench.notifications")
             logger.error(f"All display methods failed: {e3}")
 
     # Get user input - may also fail in headless environments
     logger.info("About to call nvim.call('input', 'Enter selection number: ')")
     try:
-        choice_input = nvim.call('input', 'Enter selection number: ')
+        choice_input = nvim.call("input", "Enter selection number: ")
         logger.info(f"Got input from user: {repr(choice_input)} (type: {type(choice_input)})")
     except Exception as e:
         # In test environments, nvim.call('input') may also fail due to pynvim internal state
@@ -141,7 +145,7 @@ def select_from_choices_sync(nvim: Any, choices: List[Dict[str, str]], prompt_ti
         return None
 
     # Handle empty string input
-    if isinstance(choice_input, str) and choice_input.strip() == '':
+    if isinstance(choice_input, str) and choice_input.strip() == "":
         logger.error("Received empty string input")
         notify_error_after_input(nvim, "Empty input. Selection cancelled.")
         return None
@@ -156,7 +160,9 @@ def select_from_choices_sync(nvim: Any, choices: List[Dict[str, str]], prompt_ti
             return selected_choice
         else:
             logger.error(f"Invalid selection index {choice_idx}, must be between 0 and {len(choices)-1}")
-            notify_error_after_input(nvim, f"Invalid selection: number out of range (1-{len(choices)}). No kernel selected.")
+            notify_error_after_input(
+                nvim, f"Invalid selection: number out of range (1-{len(choices)}). No kernel selected."
+            )
             return None
     except (ValueError, TypeError) as e:
         logger.error(f"Failed to convert input '{choice_input}' to integer: {e}")

@@ -19,7 +19,7 @@ except ImportError:
 
 class DateTimeEncoder(json.JSONEncoder):
     """Custom JSON encoder that handles datetime objects."""
-    
+
     def default(self, obj):
         if isinstance(obj, datetime):
             return obj.isoformat()
@@ -86,10 +86,10 @@ class WebServer:
             self.app = web.Application()
 
             # Add routes
-            self.app.router.add_get('/', self._handle_index)
-            self.app.router.add_get('/api/sessions', self._handle_sessions_api)
-            self.app.router.add_get('/ws/{kernel_id}', self._handle_websocket)
-            self.app.router.add_static('/static/', path=self._get_frontend_path(), name='static')
+            self.app.router.add_get("/", self._handle_index)
+            self.app.router.add_get("/api/sessions", self._handle_sessions_api)
+            self.app.router.add_get("/ws/{kernel_id}", self._handle_websocket)
+            self.app.router.add_static("/static/", path=self._get_frontend_path(), name="static")
 
             # Create and start the app runner
             self.runner = web.AppRunner(self.app)
@@ -159,7 +159,7 @@ class WebServer:
         raise OSError(
             errno.EADDRINUSE,
             f"Could not find an available port after {self.max_port_attempts} attempts "
-            f"(tried ports {original_port}-{self.port - 1})"
+            f"(tried ports {original_port}-{self.port - 1})",
         )
 
     async def stop(self):
@@ -172,7 +172,9 @@ class WebServer:
         active_websockets = [ws for conns in self.active_connections.values() for ws in conns if not ws.closed]
         if active_websockets:
             self._logger.info(f"Closing {len(active_websockets)} active WebSocket connections.")
-            await asyncio.gather(*(ws.close(code=1000, message='Server shutdown') for ws in active_websockets), return_exceptions=True)
+            await asyncio.gather(
+                *(ws.close(code=1000, message="Server shutdown") for ws in active_websockets), return_exceptions=True
+            )
 
         self.active_connections.clear()
 
@@ -194,32 +196,32 @@ class WebServer:
     def _get_frontend_path(self) -> str:
         """
         Get the path to the frontend directory.
-        
+
         Returns:
             str: Path to the frontend directory
         """
         current_dir = Path(__file__).parent
-        frontend_path = current_dir / 'frontend'
+        frontend_path = current_dir / "frontend"
         return str(frontend_path)
 
     async def _handle_index(self, request):
         """
         Handle requests to the root path by serving the index.html file.
-        
+
         Args:
             request: The aiohttp request object
-            
+
         Returns:
             web.Response: The response containing the index.html content
         """
         try:
             frontend_path = Path(self._get_frontend_path())
-            index_path = frontend_path / 'index.html'
-            
+            index_path = frontend_path / "index.html"
+
             if index_path.exists():
-                with open(index_path, 'r', encoding='utf-8') as f:
+                with open(index_path, "r", encoding="utf-8") as f:
                     content = f.read()
-                return web.Response(text=content, content_type='text/html')
+                return web.Response(text=content, content_type="text/html")
             else:
                 # Return a simple default page if index.html doesn't exist
                 default_html = """
@@ -235,8 +237,8 @@ class WebServer:
                 </body>
                 </html>
                 """
-                return web.Response(text=default_html, content_type='text/html')
-                
+                return web.Response(text=default_html, content_type="text/html")
+
         except Exception as e:
             self._logger.error(f"Error serving index page: {e}")
             return web.Response(text="Internal Server Error", status=500)
@@ -244,20 +246,17 @@ class WebServer:
     async def _handle_sessions_api(self, request):
         """
         Handle API requests for listing available kernel sessions.
-        
+
         Returns:
             web.Response: JSON response with session information
         """
         try:
             if not self.kernel_manager:
                 return web.json_response({"error": "No kernel manager available"}, status=500)
-            
+
             sessions = self.kernel_manager.list_sessions()
-            return web.json_response({
-                "sessions": sessions,
-                "count": len(sessions)
-            })
-            
+            return web.json_response({"sessions": sessions, "count": len(sessions)})
+
         except Exception as e:
             self._logger.error(f"Error in sessions API: {e}")
             return web.json_response({"error": str(e)}, status=500)
@@ -265,22 +264,22 @@ class WebServer:
     async def _handle_websocket(self, request):
         """
         Handle WebSocket connections for relaying kernel output.
-        
+
         This method:
         1. Extracts kernel_id from the URL
         2. Finds the corresponding KernelSession
         3. Sends the entire output_cache to the new client
         4. Adds the client to active_connections
         5. Handles client disconnection gracefully
-        
+
         Args:
             request: The aiohttp request object containing the WebSocket upgrade
-            
+
         Returns:
             WebSocketResponse: The WebSocket response object
         """
         # Extract kernel_id from the URL
-        kernel_id = request.match_info.get('kernel_id')
+        kernel_id = request.match_info.get("kernel_id")
         if not kernel_id:
             self._logger.warning("WebSocket connection attempted without kernel_id")
             return web.Response(text="Missing kernel_id", status=400)
@@ -294,14 +293,16 @@ class WebServer:
         session = None
         available_sessions = list(self.kernel_manager.sessions.keys())
         self._logger.debug(f"Looking for kernel_id '{kernel_id}', available sessions: {available_sessions}")
-        
+
         for session_id, kernel_session in self.kernel_manager.sessions.items():
             if session_id == kernel_id:
                 session = kernel_session
                 break
 
         if not session:
-            self._logger.warning(f"No kernel session found for kernel_id: {kernel_id} (available: {available_sessions})")
+            self._logger.warning(
+                f"No kernel session found for kernel_id: {kernel_id} (available: {available_sessions})"
+            )
             return web.Response(text=f"Kernel session {kernel_id} not found", status=404)
 
         # Prepare the WebSocket response
@@ -335,9 +336,9 @@ class WebServer:
                         # Future implementation could handle client commands
                     except json.JSONDecodeError:
                         self._logger.warning(f"Invalid JSON received from WebSocket client: {msg.data}")
-                        
+
                 elif msg.type == WSMsgType.ERROR:
-                    self._logger.error(f'WebSocket error: {ws.exception()}')
+                    self._logger.error(f"WebSocket error: {ws.exception()}")
                     break
                 elif msg.type == WSMsgType.CLOSE:
                     self._logger.info(f"WebSocket client disconnected from kernel {kernel_id[:8]}")
@@ -360,7 +361,7 @@ class WebServer:
     async def broadcast_message(self, kernel_id: str, message: dict):
         """
         Send a message to all WebSocket clients connected to a specific kernel.
-        
+
         Args:
             kernel_id: The kernel ID to broadcast to
             message: The message dictionary to send
@@ -370,23 +371,23 @@ class WebServer:
 
         # Work with a copy of the connections set to avoid modification during iteration
         connections = self.active_connections[kernel_id].copy()
-        
+
         for ws in connections:
             try:
                 if ws.closed:
                     # Remove closed connections
                     self.active_connections[kernel_id].discard(ws)
                     continue
-                    
+
                 await ws.send_str(json.dumps(message, cls=DateTimeEncoder))
                 self._logger.debug(f"Broadcasted message to WebSocket client for kernel {kernel_id[:8]}")
-                
+
             except Exception as e:
                 # Handle disconnected clients gracefully
                 self._logger.warning(f"Failed to send message to WebSocket client for kernel {kernel_id[:8]}: {e}")
                 # Remove the problematic connection
                 self.active_connections[kernel_id].discard(ws)
-                
+
                 # Try to close the connection if it's not already closed
                 if not ws.closed:
                     try:
@@ -401,10 +402,10 @@ class WebServer:
     def get_connection_count(self, kernel_id: str) -> int:
         """
         Get the number of active WebSocket connections for a kernel.
-        
+
         Args:
             kernel_id: The kernel ID to check
-            
+
         Returns:
             int: Number of active connections
         """
@@ -424,10 +425,7 @@ class WebServer:
         Broadcasts a kernel update notification to all connected clients.
         This is used to notify clients when kernel lists change so they can refresh.
         """
-        update_message = {
-            'msg_type': 'kernel_update',
-            'content': {'status': 'kernels_changed'}
-        }
+        update_message = {"msg_type": "kernel_update", "content": {"status": "kernels_changed"}}
         all_connections = []
         for connections in self.active_connections.values():
             all_connections.extend(connections)

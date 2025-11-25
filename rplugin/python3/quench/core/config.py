@@ -4,6 +4,7 @@ Configuration management utilities for the Quench plugin.
 This module contains functions for retrieving and managing plugin configuration
 from Neovim global variables with appropriate defaults and error handling.
 """
+
 import logging
 from typing import Any
 
@@ -21,11 +22,11 @@ def get_cell_delimiter(nvim: Any, logger: logging.Logger) -> str:
              This matches one or more '#' characters followed by optional spaces and '%%'.
     """
     try:
-        delimiter = nvim.vars.get('quench_nvim_cell_delimiter', r'^#+\s*%%')
+        delimiter = nvim.vars.get("quench_nvim_cell_delimiter", r"^#+\s*%%")
         return delimiter
     except Exception:
         logger.warning("Failed to get custom cell delimiter, using default '^#+\\s*%%'")
-        return r'^#+\s*%%'
+        return r"^#+\s*%%"
 
 
 def get_web_server_host(nvim: Any, logger: logging.Logger) -> str:
@@ -40,10 +41,10 @@ def get_web_server_host(nvim: Any, logger: logging.Logger) -> str:
         str: The host address for the web server, defaults to '127.0.0.1' if not set.
     """
     try:
-        return nvim.vars.get('quench_nvim_web_server_host', '127.0.0.1')
+        return nvim.vars.get("quench_nvim_web_server_host", "127.0.0.1")
     except Exception as e:
         logger.warning(f"Error getting web server host from Neovim variable: {e}")
-        return '127.0.0.1'
+        return "127.0.0.1"
 
 
 def get_web_server_port(nvim: Any, logger: logging.Logger) -> int:
@@ -58,7 +59,7 @@ def get_web_server_port(nvim: Any, logger: logging.Logger) -> int:
         int: The port number for the web server, defaults to 8765 if not set.
     """
     try:
-        return nvim.vars.get('quench_nvim_web_server_port', 8765)
+        return nvim.vars.get("quench_nvim_web_server_port", 8765)
     except Exception as e:
         logger.warning(f"Error getting web server port from Neovim variable: {e}")
         return 8765
@@ -80,7 +81,7 @@ def get_web_server_auto_select_port(nvim: Any, logger: logging.Logger) -> bool:
         bool: Whether to automatically select an available port, defaults to False.
     """
     try:
-        return nvim.vars.get('quench_nvim_web_server_auto_select_port', False)
+        return nvim.vars.get("quench_nvim_web_server_auto_select_port", False)
     except Exception as e:
         logger.warning(f"Error getting auto_select_port from Neovim variable: {e}")
         return False

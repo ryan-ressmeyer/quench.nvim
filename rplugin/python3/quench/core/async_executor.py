@@ -9,6 +9,7 @@ import asyncio
 import logging
 from typing import Any, Awaitable, Optional
 
+
 class AsyncExecutor:
     """
     Centralized async execution management for the Quench plugin.
@@ -46,9 +47,10 @@ class AsyncExecutor:
             # Use the Python notification system
             try:
                 from ..utils.notifications import notify_user
+
                 error_msg = str(e)  # Capture the error message before lambda
                 self.nvim.async_call(
-                    lambda: notify_user(self.nvim, f"{error_context} failed: {error_msg}", level='error')
+                    lambda: notify_user(self.nvim, f"{error_context} failed: {error_msg}", level="error")
                 )
             except Exception as notify_error:
                 self._logger.error(f"Failed to notify user of {error_context} error: {notify_error}")
@@ -88,7 +90,12 @@ class AsyncExecutor:
                         try:
                             # Notify user of the failure via import since we're not in async context
                             from ..utils.notifications import notify_user
-                            self.nvim.async_call(lambda: notify_user(self.nvim, f"{error_context} failed: {task.exception()}", level='error'))
+
+                            self.nvim.async_call(
+                                lambda: notify_user(
+                                    self.nvim, f"{error_context} failed: {task.exception()}", level="error"
+                                )
+                            )
                         except Exception as notify_error:
                             self._logger.error(f"Failed to notify user of background task error: {notify_error}")
 

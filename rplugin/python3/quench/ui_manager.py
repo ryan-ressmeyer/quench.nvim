@@ -26,10 +26,10 @@ class NvimUIManager:
         """
         return self.nvim.current.buffer.number
 
-    async def get_cell_code(self, bnum, lnum, delimiter_pattern=r'^#+\s*%%'):
+    async def get_cell_code(self, bnum, lnum, delimiter_pattern=r"^#+\s*%%"):
         """
         Find the code cell containing the given line number and return its content.
-        
+
         Code cells are delimited by configurable patterns or file boundaries.
 
         Args:
@@ -44,7 +44,7 @@ class NvimUIManager:
         buffer = None
         try:
             # Try to access buffers property
-            if hasattr(self.nvim, 'buffers'):
+            if hasattr(self.nvim, "buffers"):
                 for buf in self.nvim.buffers:
                     if buf.number == bnum:
                         buffer = buf
@@ -60,7 +60,7 @@ class NvimUIManager:
                 buffer = self.nvim.current.buffer
             except (AttributeError, pynvim.api.NvimError):
                 return ""
-        
+
         if buffer is None:
             return ""
 
@@ -100,14 +100,14 @@ class NvimUIManager:
 
         # Extract the cell content
         cell_lines = lines[cell_start:cell_end]
-        
+
         # Remove empty lines at the beginning and end
         while cell_lines and not cell_lines[0].strip():
             cell_lines.pop(0)
         while cell_lines and not cell_lines[-1].strip():
             cell_lines.pop()
 
-        return '\n'.join(cell_lines)
+        return "\n".join(cell_lines)
 
     async def create_output_buffer(self):
         """
@@ -117,15 +117,15 @@ class NvimUIManager:
             int: The buffer number of the created output buffer
         """
         # Create a new buffer
-        self.nvim.command('new')
+        self.nvim.command("new")
         output_buffer = self.nvim.current.buffer
-        
+
         # Set buffer options for output display
-        self.nvim.command('setlocal buftype=nofile')
-        self.nvim.command('setlocal bufhidden=hide')
-        self.nvim.command('setlocal noswapfile')
-        self.nvim.command('setlocal nomodifiable')
-        
+        self.nvim.command("setlocal buftype=nofile")
+        self.nvim.command("setlocal bufhidden=hide")
+        self.nvim.command("setlocal noswapfile")
+        self.nvim.command("setlocal nomodifiable")
+
         return output_buffer.number
 
     async def write_to_buffer(self, bnum, lines):
@@ -140,7 +140,7 @@ class NvimUIManager:
         buffer = None
         try:
             # Try to access buffers property
-            if hasattr(self.nvim, 'buffers'):
+            if hasattr(self.nvim, "buffers"):
                 for buf in self.nvim.buffers:
                     if buf.number == bnum:
                         buffer = buf
@@ -156,20 +156,20 @@ class NvimUIManager:
                 buffer = self.nvim.current.buffer
             except (AttributeError, pynvim.api.NvimError):
                 return
-        
+
         if buffer is None:
             return
 
         try:
             # Make buffer modifiable temporarily
-            self.nvim.command(f'buffer {bnum}')
-            self.nvim.command('setlocal modifiable')
-            
+            self.nvim.command(f"buffer {bnum}")
+            self.nvim.command("setlocal modifiable")
+
             # Clear existing content and write new lines
             buffer[:] = lines if isinstance(lines, list) else [lines]
-            
+
             # Make buffer non-modifiable again
-            self.nvim.command('setlocal nomodifiable')
+            self.nvim.command("setlocal nomodifiable")
         except (AttributeError, TypeError, pynvim.api.NvimError):
             # If we can't write to the buffer, silently fail
             pass
@@ -193,8 +193,8 @@ class NvimUIManager:
         if len(items) == 1:
             # For single item, return the value if it's a dict, otherwise return the item
             item = items[0]
-            if isinstance(item, dict) and 'value' in item:
-                return item['value']
+            if isinstance(item, dict) and "value" in item:
+                return item["value"]
             return item
 
         # Create a numbered list for display
@@ -202,27 +202,27 @@ class NvimUIManager:
         for i, item in enumerate(items, 1):
             if isinstance(item, dict):
                 # Use display_name if available, fallback to value or string representation
-                display_text = item.get('display_name', item.get('value', str(item)))
+                display_text = item.get("display_name", item.get("value", str(item)))
             else:
                 # Backward compatibility: treat as string
                 display_text = str(item)
             choices.append(f"{i}. {display_text}")
 
         # Display choices and get user input
-        choice_text = '\n'.join(choices)
+        choice_text = "\n".join(choices)
         prompt = f"Choose an option:\n{choice_text}\nEnter number (1-{len(items)}): "
-        
+
         try:
-            response = self.nvim.call('input', prompt)
-            if response is None or response == '':
+            response = self.nvim.call("input", prompt)
+            if response is None or response == "":
                 return None
             choice_num = int(response.strip())
-            
+
             if 1 <= choice_num <= len(items):
                 selected_item = items[choice_num - 1]
                 # Return the value if it's a dict, otherwise return the item itself
-                if isinstance(selected_item, dict) and 'value' in selected_item:
-                    return selected_item['value']
+                if isinstance(selected_item, dict) and "value" in selected_item:
+                    return selected_item["value"]
                 return selected_item
             else:
                 return None

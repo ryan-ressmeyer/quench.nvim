@@ -6,6 +6,7 @@ Run cells 1-4 in sequence to see the main state transitions.
 
 # %% Cell 1: Idle → Busy → Idle (Green pulsing)
 import time
+
 print("State: Idle (Blue) → Busy (Green pulsing) → Idle (Blue)")
 for i in range(3):
     print(f"Working... {i+1}/3")
@@ -24,6 +25,7 @@ print("Recovered! Back to Idle state")
 print("State: About to crash kernel → Dead (Orange X)")
 print("After this, run Cell 5 to test auto-restart")
 import os, signal, time
+
 time.sleep(2)
 os.kill(os.getpid(), signal.SIGKILL)
 
