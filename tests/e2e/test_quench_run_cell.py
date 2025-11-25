@@ -14,7 +14,7 @@ import pytest
 import time
 import re
 from pathlib import Path
-from .test_neovim_instance import TestNeovimInstance
+from .test_neovim_instance import NeovimTestInstance
 
 
 @pytest.mark.e2e
@@ -36,7 +36,7 @@ async def test_quench_run_cell_auto_start():
     This should reproduce the "no switch() in NoneType" error if present.
     """
     test_config_path = Path(__file__).parent / "test_nvim_config.lua"
-    nvim_instance = TestNeovimInstance(config_file=str(test_config_path))
+    nvim_instance = NeovimTestInstance(config_file=str(test_config_path))
 
     try:
         # Step 1: Launch Neovim and load Quench plugin
@@ -350,7 +350,7 @@ def check_for_nonetype_error(error_check: dict, all_messages: list) -> str:
     Check specifically for the "no switch() in NoneType" error we're trying to reproduce.
 
     Args:
-        error_check: Error check results from TestNeovimInstance
+        error_check: Error check results from NeovimTestInstance
         all_messages: All captured messages
 
     Returns:

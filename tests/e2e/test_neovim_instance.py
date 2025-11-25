@@ -1,7 +1,7 @@
 """
-TestNeovimInstance - Managed Neovim instance for end-to-end testing.
+NeovimTestInstance - Managed Neovim instance for end-to-end testing.
 
-This module provides a TestNeovimInstance class that manages a real Neovim process
+This module provides a NeovimTestInstance class that manages a real Neovim process
 for testing Quench plugin functionality in a realistic environment.
 """
 
@@ -16,7 +16,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class TestNeovimInstance:
+class NeovimTestInstance:
     """
     Manages a real Neovim instance for end-to-end testing.
 
@@ -50,7 +50,7 @@ class TestNeovimInstance:
         # Create temporary directory for test files
         self.temp_dir = tempfile.TemporaryDirectory()
 
-        logger.info("TestNeovimInstance prepared - ready for command execution")
+        logger.info("NeovimTestInstance prepared - ready for command execution")
 
     def _record_log_position(self) -> None:
         """Record the current position in the Quench log file."""

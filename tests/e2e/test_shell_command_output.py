@@ -11,7 +11,7 @@ import asyncio
 import pytest
 import time
 from pathlib import Path
-from .test_neovim_instance import TestNeovimInstance
+from .test_neovim_instance import NeovimTestInstance
 
 
 @pytest.mark.e2e
@@ -30,7 +30,7 @@ async def test_shell_command_output():
     logic in handleStream, causing the actual output to be deleted.
     """
     test_config_path = Path(__file__).parent / "test_nvim_config.lua"
-    nvim_instance = TestNeovimInstance(config_file=str(test_config_path))
+    nvim_instance = NeovimTestInstance(config_file=str(test_config_path))
 
     try:
         # Step 1: Launch Neovim and load Quench plugin
