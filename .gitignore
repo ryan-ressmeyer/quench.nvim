@@ -68,5 +68,18 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Type checking and linting caches
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
 
+# Neovim help tags (auto-generated)
+doc/tags
 
+# Additional coverage formats
+coverage.xml
+.coverage.*
+
+# Hypothesis (property-based testing)
+.hypothesis/
