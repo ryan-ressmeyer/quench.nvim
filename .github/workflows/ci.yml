@@ -164,6 +164,11 @@ jobs:
       run: |
         python -m ipykernel install --user
 
+    - name: Generate Neovim rplugin manifest
+      run: |
+        export NVIM_PYTHON_HOST=$(which python)
+        nvim --headless -c "set rtp+=$PWD | set rtp+=$PWD/rplugin | UpdateRemotePlugins | qall!"
+
     - name: Run tests with coverage
       run: |
         export NVIM_PYTHON_HOST=$(which python)

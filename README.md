@@ -3,6 +3,7 @@
 [![Neovim](https://img.shields.io/badge/Neovim-0.8+-green.svg?style=flat-square&logo=neovim)](https://neovim.io)
 [![Python](https://img.shields.io/badge/Python-3.9+-blue.svg?style=flat-square&logo=python)](https://www.python.org)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
+[![codecov](https://codecov.io/gh/ryan-ressmeyer/quench.nvim/branch/main/graph/badge.svg)](https://codecov.io/gh/ryan-ressmeyer/quench.nvim)
 
 **Interactive Python development in Neovim using cell-based execution.**
 
@@ -163,3 +164,9 @@ autocmd FileType python nnoremap <buffer><silent> <leader>R :QuenchRunCellAdvanc
 autocmd FileType python vnoremap <buffer><silent> <leader>r :QuenchRunSelection<CR>
 autocmd FileType python nnoremap <buffer><silent> <leader>s :QuenchStatus<CR>
 ```
+
+## ☕ Support
+
+I'm a neuroscience PhD student who writes open source code on the side. If you find Quench useful, I'd appreciate any support!
+
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-donate-yellow.svg?style=flat-square&logo=buy-me-a-coffee)](https://buymeacoffee.com/ryanress)
