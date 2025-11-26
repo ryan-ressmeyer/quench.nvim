@@ -127,6 +127,11 @@ jobs:
       run: |
         pytest tests/unit/ -v --tb=short
 
+    - name: Generate Neovim rplugin manifest
+      run: |
+        export NVIM_PYTHON_HOST=$(which python)
+        nvim --headless -c "set rtp+=$PWD | set rtp+=$PWD/rplugin | UpdateRemotePlugins | qall!"
+
     - name: Run e2e tests
       run: |
         export NVIM_PYTHON_HOST=$(which python)

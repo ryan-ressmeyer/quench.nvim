@@ -25,18 +25,22 @@ vim.opt.runtimepath:prepend(current_dir)
 vim.opt.runtimepath:append(current_dir .. '/rplugin')
 
 -- Enable Python 3 provider (required for pynvim)
--- Use environment variable if set (for CI), otherwise use exepath to find python3
+-- Priority: 1) NVIM_PYTHON_HOST (CI), 2) venv (local dev), 3) system python (fallback)
 local python_host = os.getenv('NVIM_PYTHON_HOST')
 if python_host then
+  -- CI environment - use explicitly provided Python
   vim.g.python3_host_prog = python_host
 else
-  -- Try to find python3 in PATH
-  local python_path = vim.fn.exepath('python3') or vim.fn.exepath('python')
-  if python_path ~= '' then
-    vim.g.python3_host_prog = python_path
+  -- Local development - try venv first
+  local venv_python = '/home/ryanress/code/ubuntu-config/nvim/pynvim-env/.venv/bin/python'
+  if vim.fn.executable(venv_python) == 1 then
+    vim.g.python3_host_prog = venv_python
   else
-    -- Fallback to local development path
-    vim.g.python3_host_prog = '/home/ryanress/code/ubuntu-config/nvim/pynvim-env/.venv/bin/python'
+    -- Fallback to system python if venv doesn't exist
+    local python_path = vim.fn.exepath('python3') or vim.fn.exepath('python')
+    if python_path ~= '' then
+      vim.g.python3_host_prog = python_path
+    end
   end
 end
 
