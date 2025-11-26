@@ -13,6 +13,7 @@ Quench brings Visual Studio Code's Jupyter-like cell execution workflow to Neovi
 
   * **Cell-Based Execution**: Structure your Python scripts with `#%%` delimiters and run code blocks individually.
   * **Rich Media Output**: Automatically displays Matplotlib plots, Pandas DataFrames, and HTML content in a browser window for content that doesn't fit in a terminal.
+  * **Auto-Start Web Server**: Web server automatically starts when Neovim launches, allowing you to connect your browser immediately (configurable).
   * **Direct Integration**: Get immediate text-based feedback within Neovim while rich media renders in the browser.
   * **Kernel Management**: Manages IPython kernels with isolated environments for each project. Each buffer maps to its own kernel session, and variables persist between cell executions within the same buffer.
   * **Non-blocking Asynchronous Operation**: Built with `asyncio` to run in the background, keeping your editor responsive.
@@ -25,8 +26,6 @@ Quench brings Visual Studio Code's Jupyter-like cell execution workflow to Neovi
   * Python >= 3.9
   * `pynvim >= 0.4.3`
   * `jupyter-client >= 7.0.0`
-
-**Optional (for rich media output in browser):**
   * `aiohttp >= 3.8.0`
   * `websockets >= 11.0.0`
 
@@ -80,7 +79,7 @@ After installing, you need to update the remote plugins by running the following
     :QuenchRunCell
     ```
 
-5.  **Check your output**. "Hello, Quench!" will appear in your Neovim command line, and a browser window will open to display the Matplotlib plot. 🎉
+5.  **Check your output**. Open a browser window to display the Matplotlib plot. 🎉
 
 ## 🛠️ Commands
 
@@ -120,6 +119,10 @@ vim.g.quench_nvim_web_server_host = "127.0.0.1"
 -- Web server port (default: 8765)
 vim.g.quench_nvim_web_server_port = 8765
 
+-- Auto-start web server when Neovim launches (default: true)
+-- Set to false if you prefer manual server startup via :QuenchRunCell
+vim.g.quench_nvim_autostart_server = true
+
 -- Automatically select next available port if configured port is in use
 -- (default: false - disabled for security; fails if port unavailable)
 vim.g.quench_nvim_web_server_auto_select_port = false
@@ -149,6 +152,10 @@ let g:quench_nvim_web_server_host = "127.0.0.1"
 
 " Web server port (default: 8765)
 let g:quench_nvim_web_server_port = 8765
+
+" Auto-start web server when Neovim launches (default: 1)
+" Set to 0 if you prefer manual server startup via :QuenchRunCell
+let g:quench_nvim_autostart_server = 1
 
 " Automatically select next available port if configured port is in use
 " (default: 0 - disabled for security; fails if port unavailable)

@@ -909,5 +909,167 @@ class TestQuenchPlugin:
             ), f"Should not have NoneType/switch errors: {self.mock_nvim.error_messages}"
 
 
+class TestWebServerAutoStart:
+    """Test cases for web server auto-start functionality."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.mock_nvim = MockNvim()
+        # Configure auto-start enabled
+        self.mock_nvim.vars.get = Mock(
+            side_effect=lambda k, d: {
+                "quench_nvim_cell_delimiter": r"^#+\s*%%",
+                "quench_nvim_web_server_host": "127.0.0.1",
+                "quench_nvim_web_server_port": 8765,
+                "quench_nvim_web_server_auto_select_port": False,
+                "quench_nvim_autostart_server": True,
+            }.get(k, d)
+        )
+
+    @pytest.mark.asyncio
+    async def test_autostart_enabled_success(self):
+        """Test auto-start with configuration enabled."""
+        with (
+            patch("quench.KernelSessionManager"),
+            patch("quench.WebServer") as MockWebServer,
+            patch("quench.NvimUIManager"),
+        ):
+            # Mock successful server start
+            mock_web_server = AsyncMock()
+            mock_web_server.start = AsyncMock(return_value=(False, None))
+            mock_web_server.host = "127.0.0.1"
+            mock_web_server.port = 8765
+            MockWebServer.return_value = mock_web_server
+
+            plugin = Quench(self.mock_nvim)
+
+            # Simulate VimEnter
+            await plugin._autostart_web_server()
+
+            # Verify server was started
+            mock_web_server.start.assert_called_once()
+            assert plugin.web_server_started is True
+
+    @pytest.mark.asyncio
+    async def test_autostart_fallback_port_notifies(self):
+        """Test auto-start notifies when fallback port is used."""
+        with (
+            patch("quench.KernelSessionManager"),
+            patch("quench.WebServer") as MockWebServer,
+            patch("quench.NvimUIManager"),
+        ):
+            # Mock fallback port scenario
+            mock_web_server = AsyncMock()
+            mock_web_server.start = AsyncMock(return_value=(True, 8765))
+            mock_web_server.host = "127.0.0.1"
+            mock_web_server.port = 8766  # Different port
+            MockWebServer.return_value = mock_web_server
+
+            plugin = Quench(self.mock_nvim)
+
+            # Simulate VimEnter
+            await plugin._autostart_web_server()
+
+            # Verify server started and notified about fallback
+            mock_web_server.start.assert_called_once()
+            assert plugin.web_server_started is True
+            # Should notify about fallback port
+            assert any("Port 8765 in use" in msg for msg in self.mock_nvim.output_messages)
+
+    @pytest.mark.asyncio
+    async def test_autostart_disabled(self):
+        """Test auto-start respects disabled configuration."""
+        # Configure auto-start disabled
+        self.mock_nvim.vars.get = Mock(
+            side_effect=lambda k, d: {
+                "quench_nvim_autostart_server": False,
+            }.get(k, d)
+        )
+
+        with (
+            patch("quench.KernelSessionManager"),
+            patch("quench.WebServer") as MockWebServer,
+            patch("quench.NvimUIManager"),
+        ):
+            mock_web_server = AsyncMock()
+            MockWebServer.return_value = mock_web_server
+
+            plugin = Quench(self.mock_nvim)
+
+            # Simulate VimEnter - should do nothing
+            plugin.on_vim_enter()
+
+            # Verify server was NOT started
+            mock_web_server.start.assert_not_called()
+            assert plugin.web_server_started is False
+
+    @pytest.mark.asyncio
+    async def test_lazy_start_still_works(self):
+        """Test lazy start still works when auto-start disabled."""
+        self.mock_nvim.vars.get = Mock(
+            side_effect=lambda k, d: {
+                "quench_nvim_autostart_server": False,
+                "quench_nvim_cell_delimiter": r"^#+\s*%%",
+            }.get(k, d)
+        )
+
+        with (
+            patch("quench.KernelSessionManager") as MockKernelManager,
+            patch("quench.WebServer") as MockWebServer,
+            patch("quench.NvimUIManager"),
+        ):
+            mock_web_server = AsyncMock()
+            mock_web_server.start = AsyncMock(return_value=(False, None))
+            mock_web_server.host = "127.0.0.1"
+            mock_web_server.port = 8765
+            MockWebServer.return_value = mock_web_server
+
+            mock_kernel_manager = AsyncMock()
+            mock_session = AsyncMock()
+            mock_session.kernel_id = "test-kernel-123"
+            mock_kernel_manager.get_or_create_session = AsyncMock(return_value=mock_session)
+            MockKernelManager.return_value = mock_kernel_manager
+
+            plugin = Quench(self.mock_nvim)
+
+            # VimEnter should not start server
+            plugin.on_vim_enter()
+            assert plugin.web_server_started is False
+
+            # But running a cell should trigger lazy start
+            kernel_choice = {"value": "python3", "is_running": False}
+            await plugin._run_cell_async(1, "print('hello')", kernel_choice)
+
+            # Verify server was started by lazy start
+            mock_web_server.start.assert_called_once()
+            assert plugin.web_server_started is True
+
+    @pytest.mark.asyncio
+    async def test_ensure_web_server_idempotent(self):
+        """Test _ensure_web_server_started is idempotent."""
+        with (
+            patch("quench.KernelSessionManager"),
+            patch("quench.WebServer") as MockWebServer,
+            patch("quench.NvimUIManager"),
+        ):
+            mock_web_server = AsyncMock()
+            mock_web_server.start = AsyncMock(return_value=(False, None))
+            mock_web_server.host = "127.0.0.1"
+            mock_web_server.port = 8765
+            MockWebServer.return_value = mock_web_server
+
+            plugin = Quench(self.mock_nvim)
+
+            # First call should start server
+            result1 = await plugin._ensure_web_server_started()
+            assert result1 is True
+            assert mock_web_server.start.call_count == 1
+
+            # Second call should return immediately
+            result2 = await plugin._ensure_web_server_started()
+            assert result2 is True
+            assert mock_web_server.start.call_count == 1  # Not called again
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

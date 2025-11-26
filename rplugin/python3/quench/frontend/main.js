@@ -404,6 +404,9 @@ class QuenchClient {
 
             // Add to the output area
             this.outputArea.appendChild(cellElement);
+
+            // Auto-scroll to bottom if enabled
+            this.autoscroll();
         } else {
             console.warn('Execute input message without parent_header.msg_id:', message);
         }

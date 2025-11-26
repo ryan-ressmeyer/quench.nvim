@@ -73,6 +73,7 @@ This is a fully implemented and production-ready plugin with comprehensive testi
 - Central message queue (asyncio.Queue) for component communication
 - Cell-based execution using `#%%` delimiters in Python files
 - Web browser integration for rich media (plots, audio, etc.)
+- Web server auto-starts on VimEnter by default (configurable via `quench_nvim_autostart_server`)
 - Automatic kernel death detection and recovery for robust execution
 
 ### Kernel Lifecycle Management
@@ -244,8 +245,9 @@ lua/quench/init.lua      # Basic Lua module setup
 - File I/O and network requests
 - Long-running computations
 
-### Web Server Integration  
+### Web Server Integration
 - Default server: `http://127.0.0.1:8765`
+- Auto-starts on Neovim launch by default (configurable via `quench_nvim_autostart_server`, default: True)
 - WebSocket endpoints: `/ws/{kernel_id}` for real-time output
 - Static file serving for frontend assets
 - Cell-based output correlation using Jupyter message IDs

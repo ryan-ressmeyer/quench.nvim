@@ -85,3 +85,24 @@ def get_web_server_auto_select_port(nvim: Any, logger: logging.Logger) -> bool:
     except Exception as e:
         logger.warning(f"Error getting auto_select_port from Neovim variable: {e}")
         return False
+
+
+def get_autostart_server(nvim: Any, logger: logging.Logger) -> bool:
+    """
+    Get the autostart_server setting from Neovim global variable.
+
+    When enabled, the web server will automatically start when Neovim launches.
+    This is enabled by default to provide a better out-of-box experience.
+
+    Args:
+        nvim: The pynvim.Nvim instance for interacting with Neovim
+        logger: Logger instance for error reporting
+
+    Returns:
+        bool: Whether to automatically start the server, defaults to True.
+    """
+    try:
+        return nvim.vars.get("quench_nvim_autostart_server", True)
+    except Exception as e:
+        logger.warning(f"Error getting autostart_server from Neovim variable: {e}")
+        return True

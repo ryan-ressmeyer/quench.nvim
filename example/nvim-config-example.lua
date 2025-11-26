@@ -11,8 +11,9 @@ return {
   lazy = false,  -- Load on startup
   opts = {
     web_server = {
-      host = "127.0.0.1",  -- Default: localhost only
-      port = 8765,         -- Default: 8765
+      host = "127.0.0.1",     -- Default: localhost only
+      port = 8765,            -- Default: 8765
+      autostart_server = true, -- Default: true (auto-start on Neovim launch)
     },
     -- Optional: customize cell delimiter pattern (default: r'^#+\s*%%')
     -- cell_delimiter = "^#%%",
@@ -72,6 +73,10 @@ vim.g.quench_nvim_web_server_port = 8765         -- Default: 8765
 -- Automatically select next available port if configured port is in use
 -- (default: false - disabled for security; fails if port unavailable)
 vim.g.quench_nvim_web_server_auto_select_port = false
+
+-- Auto-start web server when Neovim launches (default: true)
+-- Set to false if you prefer manual server startup via :QuenchStartKernel or :QuenchRunCell
+vim.g.quench_nvim_autostart_server = true
 
 -- Cell delimiter pattern (regex)
 -- (default: r'^#+\s*%%' - matches #%%, ##%%, # %%, etc.)

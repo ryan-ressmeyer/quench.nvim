@@ -16,7 +16,7 @@ from .ui_manager import NvimUIManager
 from .utils.notifications import notify_user, notify_user_echo, select_from_choices_sync
 
 # Import core modules
-from .core.config import get_web_server_host, get_web_server_port, get_web_server_auto_select_port
+from .core.config import get_web_server_host, get_web_server_port, get_web_server_auto_select_port, get_autostart_server
 from .core.async_executor import AsyncExecutor
 
 
@@ -52,6 +52,7 @@ class Quench:
         self._cached_web_server_host = get_web_server_host(nvim, self._logger)
         self._cached_web_server_port = get_web_server_port(nvim, self._logger)
         self._cached_web_server_auto_select_port = get_web_server_auto_select_port(nvim, self._logger)
+        self._cached_autostart_server = get_autostart_server(nvim, self._logger)
 
         self.web_server = WebServer(
             host=self._cached_web_server_host,
@@ -70,6 +71,49 @@ class Quench:
         self._cleanup_lock = asyncio.Lock()  # Lock to manage cleanup process
 
         self._logger.info("Quench plugin initialized")
+
+    @pynvim.autocmd("VimEnter", sync=True)
+    def on_vim_enter(self):
+        """
+        Handle Vim startup - optionally auto-start web server.
+        This is a synchronous handler that schedules the async task without waiting for it.
+        """
+        if not self._cached_autostart_server:
+            self._logger.info("Auto-start disabled by configuration")
+            return
+
+        self._logger.info("VimEnter triggered - scheduling web server auto-start")
+        try:
+            # Get the running event loop
+            loop = asyncio.get_running_loop()
+
+            # Schedule the auto-start task. We don't wait for it to complete,
+            # allowing Neovim to finish starting up immediately.
+            asyncio.run_coroutine_threadsafe(self._autostart_web_server(), loop)
+
+            self._logger.info("Web server auto-start scheduled")
+
+        except Exception as e:
+            self._logger.error(f"Error scheduling VimEnter auto-start: {e}")
+
+    async def _autostart_web_server(self):
+        """
+        Auto-start the web server on Neovim launch.
+
+        Notification strategy:
+        - Silent on successful start with configured port
+        - Notify if fallback port used (security concern)
+        - Notify on error
+        """
+        self._logger.info("Auto-starting web server")
+
+        # Start server with silent notification (only notify on fallback/error)
+        success = await self._ensure_web_server_started(notify_on_success=False)
+
+        if success:
+            self._logger.info("Web server auto-started successfully")
+        else:
+            self._logger.error("Web server auto-start failed")
 
     @pynvim.autocmd("VimLeave", sync=True)
     def on_vim_leave(self):
@@ -144,6 +188,90 @@ class Quench:
 
             self._logger.info("Async cleanup completed")
 
+    async def _ensure_web_server_started(self, notify_on_success: bool = True) -> bool:
+        """
+        Ensure the web server is running, starting it if necessary.
+
+        This method handles:
+        - Web server instance recreation if destroyed
+        - Port binding with fallback support
+        - User notifications based on context
+
+        Args:
+            notify_on_success: Whether to notify user on successful start.
+                              Set to False for silent auto-start.
+
+        Returns:
+            bool: True if server is running, False if startup failed.
+        """
+        # Check if already started
+        if self.web_server_started:
+            return True
+
+        async with self._cleanup_lock:
+            # Recreate web server if it was destroyed
+            if self.web_server is None:
+                self._logger.info("Creating WebServer instance.")
+                # Use cached config if available, otherwise get from config
+                host = getattr(self, "_cached_web_server_host", None) or get_web_server_host(self.nvim, self._logger)
+                port = getattr(self, "_cached_web_server_port", None) or get_web_server_port(self.nvim, self._logger)
+                auto_select_port = getattr(self, "_cached_web_server_auto_select_port", None)
+                if auto_select_port is None:
+                    auto_select_port = get_web_server_auto_select_port(self.nvim, self._logger)
+                self.web_server = WebServer(
+                    host=host,
+                    port=port,
+                    nvim=self.nvim,
+                    kernel_manager=self.kernel_manager,
+                    auto_select_port=auto_select_port,
+                )
+
+            # Try to start the server
+            try:
+                used_fallback, original_port = await self.web_server.start()
+                self.web_server_started = True
+                server_url = f"http://{self.web_server.host}:{self.web_server.port}"
+
+                # Notification logic based on context and outcome
+                if used_fallback:
+                    # Always notify when fallback port is used (security concern)
+                    def notify_fallback():
+                        notify_user(
+                            self.nvim,
+                            f"Quench: Port {original_port} in use, using port {self.web_server.port}"
+                        )
+                        if notify_on_success:
+                            notify_user(self.nvim, f"Quench web server started at {server_url}")
+
+                    try:
+                        self.nvim.async_call(notify_fallback)
+                    except Exception:
+                        self._logger.info(f"Port {original_port} in use, using port {self.web_server.port}")
+
+                elif notify_on_success:
+                    # Only notify on success if requested
+                    def notify_started():
+                        notify_user(self.nvim, f"Quench web server started at {server_url}")
+
+                    try:
+                        self.nvim.async_call(notify_started)
+                    except Exception:
+                        self._logger.info(f"Web server started at {server_url}")
+
+                self._logger.info(f"Web server started successfully at {server_url}")
+                return True
+
+            except Exception as e:
+                self._logger.error(f"Failed to start web server: {e}")
+                # Always notify on error
+                try:
+                    self.nvim.async_call(
+                        lambda err=e: notify_user(self.nvim, f"Error starting web server: {err}", level="error")
+                    )
+                except Exception:
+                    pass
+                return False
+
     def _get_or_select_kernel_sync(self, bnum):
         """
         Synchronously get the kernel for the buffer or prompt the user to select one.
@@ -193,61 +321,10 @@ class Quench:
         """
         self._logger.debug(f"Starting async execution for buffer {current_bnum}")
 
-        async with self._cleanup_lock:
-            # Recreate web server if it was destroyed
-            if self.web_server is None:
-                self._logger.info("Creating WebServer instance.")
-                # Use cached config if available, otherwise get from config
-                host = getattr(self, "_cached_web_server_host", None) or get_web_server_host(self.nvim, self._logger)
-                port = getattr(self, "_cached_web_server_port", None) or get_web_server_port(self.nvim, self._logger)
-                auto_select_port = getattr(self, "_cached_web_server_auto_select_port", None)
-                if auto_select_port is None:
-                    auto_select_port = get_web_server_auto_select_port(self.nvim, self._logger)
-                self.web_server = WebServer(
-                    host=host,
-                    port=port,
-                    nvim=self.nvim,
-                    kernel_manager=self.kernel_manager,
-                    auto_select_port=auto_select_port,
-                )
-
-            # Start web server if not already running
-            if not self.web_server_started:
-                try:
-                    used_fallback, original_port = await self.web_server.start()
-                    self.web_server_started = True
-
-                    server_url = f"http://{self.web_server.host}:{self.web_server.port}"
-                    if used_fallback:
-
-                        def notify_server_started_fallback():
-                            notify_user(
-                                self.nvim, f"Quench: Port {original_port} in use, using port {self.web_server.port}"
-                            )
-                            notify_user(self.nvim, f"Quench web server started at {server_url}")
-
-                        try:
-                            self.nvim.async_call(notify_server_started_fallback)
-                        except Exception:
-                            self._logger.info(f"Port {original_port} in use, using port {self.web_server.port}")
-                    else:
-
-                        def notify_server_started():
-                            notify_user(self.nvim, f"Quench web server started at {server_url}")
-
-                        try:
-                            self.nvim.async_call(notify_server_started)
-                        except Exception:
-                            self._logger.info(f"Web server started at {server_url}")
-
-                except Exception as e:
-                    self._logger.error(f"Failed to start web server: {e}")
-                    try:
-                        self.nvim.async_call(
-                            lambda err=e: notify_user(self.nvim, f"Error starting web server: {err}", level="error")
-                        )
-                    except Exception:
-                        pass
+        # Start web server if not already running (notify user since this is explicit action)
+        if not await self._ensure_web_server_started(notify_on_success=True):
+            # Server failed to start, but continue with execution (kernels can run without web UI)
+            pass
 
         # Get or create kernel session for this buffer
         if kernel_choice["is_running"]:
@@ -540,62 +617,10 @@ class Quench:
         """
         self._logger.debug(f"Starting new unattached kernel: {kernel_choice}")
 
-        async with self._cleanup_lock:
-            # Recreate web server if it was destroyed
-            if self.web_server is None:
-                self._logger.info("Recreating WebServer instance.")
-                # Use cached config if available, otherwise get from config
-                host = getattr(self, "_cached_web_server_host", None) or get_web_server_host(self.nvim, self._logger)
-                port = getattr(self, "_cached_web_server_port", None) or get_web_server_port(self.nvim, self._logger)
-                auto_select_port = getattr(self, "_cached_web_server_auto_select_port", None)
-                if auto_select_port is None:
-                    auto_select_port = get_web_server_auto_select_port(self.nvim, self._logger)
-                self.web_server = WebServer(
-                    host=host,
-                    port=port,
-                    nvim=self.nvim,
-                    kernel_manager=self.kernel_manager,
-                    auto_select_port=auto_select_port,
-                )
-
-            # Start web server if not already running
-            if not self.web_server_started:
-                try:
-                    self._logger.info("Starting web server from QuenchStartKernel")
-                    used_fallback, original_port = await self.web_server.start()
-                    self.web_server_started = True
-
-                    server_url = f"http://{self.web_server.host}:{self.web_server.port}"
-                    if used_fallback:
-
-                        def notify_server_started_fallback():
-                            notify_user(
-                                self.nvim, f"Quench: Port {original_port} in use, using port {self.web_server.port}"
-                            )
-                            notify_user(self.nvim, f"Quench web server started at {server_url}")
-
-                        try:
-                            self.nvim.async_call(notify_server_started_fallback)
-                        except Exception:
-                            self._logger.info(f"Port {original_port} in use, using port {self.web_server.port}")
-                    else:
-
-                        def notify_server_started():
-                            notify_user(self.nvim, f"Quench web server started at {server_url}")
-
-                        try:
-                            self.nvim.async_call(notify_server_started)
-                        except Exception:
-                            self._logger.info(f"Web server started at {server_url}")
-
-                except Exception as e:
-                    self._logger.error(f"Failed to start web server: {e}")
-                    try:
-                        self.nvim.async_call(
-                            lambda err=e: notify_user(self.nvim, f"Error starting web server: {err}", level="error")
-                        )
-                    except Exception:
-                        pass
+        # Start web server if not already running (notify user since this is explicit action)
+        if not await self._ensure_web_server_started(notify_on_success=True):
+            # Server failed to start, but continue (kernel can run without web UI)
+            pass
 
         # Start message relay loop if not running
         if self.message_relay_task is None or self.message_relay_task.done():
@@ -652,61 +677,10 @@ class Quench:
         """
         self._logger.debug(f"Selecting kernel for buffer {bnum}: {selected_choice}")
 
-        async with self._cleanup_lock:
-            # Recreate web server if it was destroyed
-            if self.web_server is None:
-                self._logger.info("Recreating WebServer instance.")
-                # Use cached config if available, otherwise get from config
-                host = getattr(self, "_cached_web_server_host", None) or get_web_server_host(self.nvim, self._logger)
-                port = getattr(self, "_cached_web_server_port", None) or get_web_server_port(self.nvim, self._logger)
-                auto_select_port = getattr(self, "_cached_web_server_auto_select_port", None)
-                if auto_select_port is None:
-                    auto_select_port = get_web_server_auto_select_port(self.nvim, self._logger)
-                self.web_server = WebServer(
-                    host=host,
-                    port=port,
-                    nvim=self.nvim,
-                    kernel_manager=self.kernel_manager,
-                    auto_select_port=auto_select_port,
-                )
-
-            # Start web server if not already running
-            if not self.web_server_started:
-                try:
-                    used_fallback, original_port = await self.web_server.start()
-                    self.web_server_started = True
-
-                    server_url = f"http://{self.web_server.host}:{self.web_server.port}"
-                    if used_fallback:
-
-                        def notify_server_started_fallback():
-                            notify_user(
-                                self.nvim, f"Quench: Port {original_port} in use, using port {self.web_server.port}"
-                            )
-                            notify_user(self.nvim, f"Quench web server started at {server_url}")
-
-                        try:
-                            self.nvim.async_call(notify_server_started_fallback)
-                        except Exception:
-                            self._logger.info(f"Port {original_port} in use, using port {self.web_server.port}")
-                    else:
-
-                        def notify_server_started():
-                            notify_user(self.nvim, f"Quench web server started at {server_url}")
-
-                        try:
-                            self.nvim.async_call(notify_server_started)
-                        except Exception:
-                            self._logger.info(f"Web server started at {server_url}")
-
-                except Exception as e:
-                    self._logger.error(f"Failed to start web server: {e}")
-                    try:
-                        self.nvim.async_call(
-                            lambda err=e: notify_user(self.nvim, f"Error starting web server: {err}", level="error")
-                        )
-                    except Exception:
-                        pass
+        # Start web server if not already running (notify user since this is explicit action)
+        if not await self._ensure_web_server_started(notify_on_success=True):
+            # Server failed to start, but continue (kernel can run without web UI)
+            pass
 
         # Start message relay loop if not running
         if self.message_relay_task is None or self.message_relay_task.done():
