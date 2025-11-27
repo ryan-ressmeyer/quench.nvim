@@ -1,3 +1,212 @@
+/**
+ * AnsiTerminalBuffer - Virtual terminal buffer for handling ANSI cursor movement codes
+ *
+ * This class implements a character-based virtual terminal buffer that tracks cursor
+ * position and handles ANSI escape sequences for cursor movement and line clearing.
+ * It works in tandem with ansi_up for color handling.
+ */
+class AnsiTerminalBuffer {
+    constructor() {
+        this.buffer = [];        // Array<Array<{char: string, ansi: string}>>
+        this.cursorRow = 0;
+        this.cursorCol = 0;
+        this.currentAnsi = '';   // Track current ANSI formatting state
+    }
+
+    /**
+     * Main entry point: process text with ANSI codes
+     */
+    write(text) {
+        const parts = this._parseAnsiText(text);
+
+        for (const part of parts) {
+            if (part.type === 'escape') {
+                this._handleEscapeCode(part.code);
+            } else if (part.type === 'text') {
+                this._writeText(part.text);
+            }
+        }
+    }
+
+    /**
+     * Parse text into chunks of text and escape codes
+     * Returns array of {type: 'text'|'escape', content: string}
+     */
+    _parseAnsiText(text) {
+        const parts = [];
+        // Match cursor movement, line clearing, and SGR (color/formatting) codes
+        const escapePattern = /\x1b\[([^m]*m|\d*[ABCD]|[012]?K)/g;
+        let lastIndex = 0;
+        let match;
+
+        while ((match = escapePattern.exec(text)) !== null) {
+            // Add text before this escape code
+            if (match.index > lastIndex) {
+                parts.push({
+                    type: 'text',
+                    text: text.substring(lastIndex, match.index)
+                });
+            }
+
+            // Add the escape code
+            parts.push({
+                type: 'escape',
+                code: match[0]
+            });
+
+            lastIndex = match.index + match[0].length;
+        }
+
+        // Add remaining text
+        if (lastIndex < text.length) {
+            parts.push({
+                type: 'text',
+                text: text.substring(lastIndex)
+            });
+        }
+
+        return parts;
+    }
+
+    /**
+     * Parse and execute ANSI escape sequences
+     */
+    _handleEscapeCode(code) {
+        // Cursor movement codes
+        if (code.match(/\x1b\[(\d*)A/)) {
+            // Cursor up
+            const n = parseInt(RegExp.$1) || 1;
+            this.cursorRow = Math.max(0, this.cursorRow - n);
+        } else if (code.match(/\x1b\[(\d*)B/)) {
+            // Cursor down
+            const n = parseInt(RegExp.$1) || 1;
+            this.cursorRow = this.cursorRow + n;
+            this._ensureRow(this.cursorRow);
+        } else if (code.match(/\x1b\[(\d*)C/)) {
+            // Cursor forward (right)
+            const n = parseInt(RegExp.$1) || 1;
+            this.cursorCol = this.cursorCol + n;
+        } else if (code.match(/\x1b\[(\d*)D/)) {
+            // Cursor backward (left)
+            const n = parseInt(RegExp.$1) || 1;
+            this.cursorCol = Math.max(0, this.cursorCol - n);
+        } else if (code.match(/\x1b\[([012]?)K/)) {
+            // Clear line
+            const mode = RegExp.$1 || '0';
+            this._clearLine(mode);
+        } else if (code.match(/\x1b\[[^m]*m/)) {
+            // Color/formatting code - store for later use
+            this.currentAnsi = code;
+        }
+    }
+
+    /**
+     * Write text at current cursor position with current formatting
+     */
+    _writeText(text) {
+        for (const char of text) {
+            if (char === '\n') {
+                this.cursorRow++;
+                this.cursorCol = 0;
+                this._ensureRow(this.cursorRow);
+            } else if (char === '\r') {
+                this.cursorCol = 0;
+            } else {
+                // Ensure row exists
+                this._ensureRow(this.cursorRow);
+                // Ensure column exists (pad with spaces if needed)
+                while (this.buffer[this.cursorRow].length <= this.cursorCol) {
+                    this.buffer[this.cursorRow].push({char: ' ', ansi: ''});
+                }
+                // Write character with current formatting
+                this.buffer[this.cursorRow][this.cursorCol] = {
+                    char: char,
+                    ansi: this.currentAnsi
+                };
+                this.cursorCol++;
+            }
+        }
+    }
+
+    /**
+     * Auto-expand buffer to accommodate the specified row
+     */
+    _ensureRow(row) {
+        while (this.buffer.length <= row) {
+            this.buffer.push([]);
+        }
+    }
+
+    /**
+     * Clear line based on mode
+     * mode '0' or '' - Clear from cursor to end of line
+     * mode '1' - Clear from beginning to cursor
+     * mode '2' - Clear entire line
+     */
+    _clearLine(mode) {
+        this._ensureRow(this.cursorRow);
+        const row = this.buffer[this.cursorRow];
+
+        if (mode === '0' || mode === '') {
+            // Clear from cursor to end of line
+            row.splice(this.cursorCol);
+        } else if (mode === '1') {
+            // Clear from beginning to cursor
+            for (let i = 0; i <= this.cursorCol && i < row.length; i++) {
+                row[i] = {char: ' ', ansi: ''};
+            }
+        } else if (mode === '2') {
+            // Clear entire line
+            this.buffer[this.cursorRow] = [];
+            this.cursorCol = 0;
+        }
+    }
+
+    /**
+     * Convert buffer to text with ANSI codes for ansi_up processing
+     * Optimizes by only emitting ANSI codes when formatting changes
+     */
+    renderToText() {
+        let result = '';
+        let lastAnsi = '';
+
+        for (const row of this.buffer) {
+            for (const cell of row) {
+                // Only emit ANSI code if it changed
+                if (cell.ansi !== lastAnsi) {
+                    // When transitioning to no-color, emit explicit reset
+                    // to prevent color bleeding across rows
+                    if (cell.ansi === '' && lastAnsi !== '') {
+                        result += '\x1b[0m';
+                    } else {
+                        result += cell.ansi;
+                    }
+                    lastAnsi = cell.ansi;
+                }
+                result += cell.char;
+            }
+            // Reset color at end of row to prevent bleeding across rows
+            if (lastAnsi !== '') {
+                result += '\x1b[0m';
+                lastAnsi = '';
+            }
+            result += '\n';
+        }
+
+        return result;
+    }
+
+    /**
+     * Clear the entire buffer and reset cursor position
+     */
+    clear() {
+        this.buffer = [];
+        this.cursorRow = 0;
+        this.cursorCol = 0;
+        this.currentAnsi = '';
+    }
+}
+
 class QuenchClient {
     constructor() {
         this.ws = null;
@@ -473,54 +682,24 @@ class QuenchClient {
             streamDiv.appendChild(textDiv);
 
             outputDiv.appendChild(streamDiv);
+
+            // Create terminal buffer for this stream
+            streamDiv._terminalBuffer = new AnsiTerminalBuffer();
         }
-        
+
         const textDiv = streamDiv.querySelector('.output-text');
-        
-        // Handle carriage returns properly
-        if (text.includes('\r')) {
-            // Convert the incoming text to HTML first
-            const convertedText = this.ansiUp.ansi_to_html(text);
-            let currentHtml = textDiv.innerHTML;
-            
-            // Split by \r, but we need to handle this more carefully
-            const parts = text.split('\r');
-            
-            // Process each part
-            for (let i = 0; i < parts.length; i++) {
-                const part = parts[i];
-                
-                if (i === 0) {
-                    // First part: just append normally
-                    currentHtml += this.ansiUp.ansi_to_html(part);
-                } else {
-                    // Subsequent parts: \r should overwrite the current line
-                    // Find the position after the last newline
-                    const lastNewlineIndex = currentHtml.lastIndexOf('\n');
-                    const lastBrIndex = currentHtml.lastIndexOf('<br>');
-                    
-                    // Use whichever is more recent
-                    const cutIndex = Math.max(lastNewlineIndex, lastBrIndex);
-                    
-                    if (cutIndex !== -1) {
-                        // Cut after the last newline/br and replace with new content
-                        if (lastBrIndex > lastNewlineIndex) {
-                            currentHtml = currentHtml.substring(0, lastBrIndex + 4) + this.ansiUp.ansi_to_html(part);
-                        } else {
-                            currentHtml = currentHtml.substring(0, lastNewlineIndex + 1) + this.ansiUp.ansi_to_html(part);
-                        }
-                    } else {
-                        // No previous newlines, this is the first line - replace everything
-                        currentHtml = this.ansiUp.ansi_to_html(part);
-                    }
-                }
-            }
-            
-            textDiv.innerHTML = currentHtml;
-        } else {
-            // Original behavior: just append the new text
-            textDiv.innerHTML += this.ansiUp.ansi_to_html(text);
+
+        // Get or create terminal buffer for this stream
+        if (!streamDiv._terminalBuffer) {
+            streamDiv._terminalBuffer = new AnsiTerminalBuffer();
         }
+        const terminalBuffer = streamDiv._terminalBuffer;
+
+        // Unified handling: ALL text goes through the terminal buffer
+        // This handles \r, cursor movement codes, and regular text uniformly
+        terminalBuffer.write(text);
+        const renderedText = terminalBuffer.renderToText();
+        textDiv.innerHTML = this.ansiUp.ansi_to_html(renderedText);
         
         // Auto-scroll to bottom if enabled
         this.autoscroll();
