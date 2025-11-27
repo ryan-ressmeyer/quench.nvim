@@ -133,7 +133,7 @@ import sys
 
 # ASCII logo from the Quench web interface
 logo_lines = [
-"      ░██████                                               ░██    ",
+"  ░██████                                               ░██        ",
 " ░██   ░██                                              ░██        ",
 "░██     ░██ ░██    ░██  ░███████  ░████████   ░███████  ░████████  ",
 "░██     ░██ ░██    ░██ ░██    ░██ ░██    ░██ ░██    ░██ ░██    ░██ ",
@@ -144,21 +144,29 @@ logo_lines = [
 "        ░██                                                        ",
 ]
 
-# Expanded gradient color palette for smooth wave effect (ANSI 256-color codes)
-# Creates smooth transitions: orange → pink → coral → blue → light blue
+# Gradient color palette for metal quenching cycle (ANSI 256-color codes)
 gradient_colors = [
-    '\033[38;5;209m',  # Orange (#ffb088)
-    '\033[38;5;210m',  # Orange-pink transition
-    '\033[38;5;211m',  # Orange-pink transition
-    '\033[38;5;212m',  # Pink
-    '\033[38;5;204m',  # Pink/Coral (#ff7799)
-    '\033[38;5;205m',  # Pink-coral transition
-    '\033[38;5;206m',  # Coral
-    '\033[38;5;207m',  # Coral-blue transition
-    '\033[38;5;117m',  # Blue (#66c7ff)
-    '\033[38;5;118m',  # Blue-light blue transition
-    '\033[38;5;153m',  # Light Blue (#99d5ff)
-    '\033[38;5;154m',  # Light blue variation
+    '\033[38;5;33m',   # Dark blue - cold metal
+    '\033[38;5;33m',   # Dark blue - cold metal
+    '\033[38;5;39m',   # Medium blue
+    '\033[38;5;75m',   # Bright blue
+    '\033[38;5;117m',  # Light blue
+    '\033[38;5;250m',  # Light gray - transition (slightly darker)
+    '\033[38;5;224m',  # Light pink/salmon
+    '\033[38;5;210m',  # Light red
+    '\033[38;5;204m',  # Bright medium red
+    '\033[38;5;203m',  # Bright red - hot metal
+    '\033[38;5;203m',  # Bright red - hot metal (peak)
+    '\033[38;5;203m',  # Bright red - hot metal
+    '\033[38;5;204m',  # Bright medium red
+    '\033[38;5;210m',  # Light red
+    '\033[38;5;224m',  # Light pink/salmon
+    '\033[38;5;250m',  # Light gray - transition (slightly darker)
+    '\033[38;5;117m',  # Light blue
+    '\033[38;5;75m',   # Bright blue
+    '\033[38;5;39m',   # Medium blue
+    '\033[38;5;33m',   # Dark blue - cold metal
+    '\033[38;5;33m',   # Dark blue - cold metal
 ]
 reset = '\033[0m'
 
@@ -169,7 +177,7 @@ for _ in range(len(logo_lines)):
     print()
 
 # Animate the logo with a color wave effect
-for frame in range(40):
+for frame in range(94):
     # Move cursor up to the start of the logo
     sys.stdout.write(f'\033[{len(logo_lines)}A')
 
@@ -180,15 +188,12 @@ for frame in range(40):
 
         colored_line = ''
         for i, char in enumerate(line):
-            if char != ' ':  # Only color visible characters
-                # Create wave effect: gradient position shifts with frame
-                # The subtraction creates leftward motion
-                gradient_pos = (i - frame * 2) % len(gradient_colors)
-                colored_line += gradient_colors[gradient_pos] + char + reset
-            else:
-                colored_line += char
+            # Create wave effect: gradient position shifts with frame
+            # The subtraction creates leftward motion
+            gradient_pos = (i//6 - frame) % len(gradient_colors)
+            colored_line += gradient_colors[gradient_pos] + char + reset
 
         sys.stdout.write(colored_line + '\n')
 
     sys.stdout.flush()
-    time.sleep(0.06)  # 60ms per frame = ~17 fps
+    time.sleep(0.10)  # 100ms per frame = ~1 fps

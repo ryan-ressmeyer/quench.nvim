@@ -57,12 +57,18 @@ After installing, you need to update the remote plugins by running the following
 1.  **Install the Python dependencies**:
 
     ```bash
-    pip install pynvim jupyter-client aiohttp websockets
+    pip install pynvim jupyter-client aiohttp websockets ipykernel
     ```
 
-2.  **Open a Python file** (`.py`) in Neovim.
+2.  **Ensure the Jupyter kernel spec is installed**:
 
-3.  **Create your first cell** by adding `#%%` as a delimiter:
+    ```bash
+    python -m ipykernel install --user
+    ```
+
+3.  **Open a Python file** (`.py`) in Neovim.
+
+4.  **Create your first cell** by adding `#%%` as a delimiter:
 
     ```python
     #%%
@@ -73,13 +79,21 @@ After installing, you need to update the remote plugins by running the following
     plt.show()
     ```
 
-4.  **Execute the cell** by placing your cursor inside it and running the command:
+5.  **Open the browser interface** by running the command:
+
+    ```vim
+    :QuenchOpen
+    ```
+
+    Alternatively, run `:QuenchStatus` to see the server URL and open it manually in your browser.
+
+6.  **Execute the cell** by placing your cursor inside it and running the command:
 
     ```vim
     :QuenchRunCell
     ```
 
-5.  **Check your output**. Open a browser window to display the Matplotlib plot. 🎉
+7.  **View the results** in your open browser window to see the Matplotlib plot. 🎉
 
 ## 🛠️ Commands
 
