@@ -28,8 +28,11 @@ This is a fully implemented and production-ready plugin with comprehensive testi
 ### Code Formatting
 - `stylua --color always --check lua` - Check Lua code formatting
 - `stylua lua` - Format Lua code (uses .stylua.toml configuration with 120 column width)
-- `black rplugin/python3/quench/` - Format Python code
-- `flake8 rplugin/python3/quench/` - Check Python code style
+- `.venv/bin/black rplugin/python3/quench/` - Format Python code
+- `.venv/bin/black --check rplugin/python3/quench/ tests/` - Check Python code formatting (CI check)
+- `.venv/bin/flake8 rplugin/python3/quench/` - Check Python code style
+
+**Note**: This project uses a local uv-managed virtual environment (`.venv/`). Always use `.venv/bin/` prefix for Python linting and formatting commands (black & flake8).
 
 ### Plugin Development
 - Plugin files are in `rplugin/python3/quench/`

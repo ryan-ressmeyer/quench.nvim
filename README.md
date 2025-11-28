@@ -3,11 +3,12 @@
 [![Neovim](https://img.shields.io/badge/Neovim-0.8+-green.svg?style=flat-square&logo=neovim)](https://neovim.io)
 [![Python](https://img.shields.io/badge/Python-3.9+-blue.svg?style=flat-square&logo=python)](https://www.python.org)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
-[![codecov](https://codecov.io/gh/ryan-ressmeyer/quench.nvim/branch/main/graph/badge.svg)](https://codecov.io/gh/ryan-ressmeyer/quench.nvim)
 
 **Interactive Python development in Neovim using cell-based execution.**
 
-Quench brings Visual Studio Code's Jupyter-like cell execution workflow to Neovim. Similar to how VS Code's Python extension allows you to run code cells defined with `# %%` delimiters, Quench enables you to structure Python scripts into executable blocks and run them interactively. Write Python code in standard `.py` files, execute cells on the fly, and view rich media output like plots, tables, and HTML in a browser—all without leaving your editor.
+Quench brings Visual Studio Code's Jupyter-like cell execution workflow to Neovim. Similar to how VS Code's Python extension allows you to run code cells defined with `#%%` delimiters, Quench enables you to structure Python scripts into executable blocks and run them interactively. Write Python code in standard `.py` files, execute cells on the fly, and view rich media output like plots, tables, and HTML in a browser—all without leaving your editor.
+
+<video src="https://github.com/user-attachments/assets/67e0329f-4ec5-41f8-b410-abed1ec83c00" controls width="80%"></video> 
 
 ## ✨ Features
 

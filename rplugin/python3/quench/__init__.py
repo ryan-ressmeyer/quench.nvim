@@ -237,8 +237,7 @@ class Quench:
                     # Always notify when fallback port is used (security concern)
                     def notify_fallback():
                         notify_user(
-                            self.nvim,
-                            f"Quench: Port {original_port} in use, using port {self.web_server.port}"
+                            self.nvim, f"Quench: Port {original_port} in use, using port {self.web_server.port}"
                         )
                         if notify_on_success:
                             notify_user(self.nvim, f"Quench web server started at {server_url}")

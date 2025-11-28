@@ -1,7 +1,4 @@
 #%%
-# ==============================================================================
-# SECTION 1: QUICK START
-# ==============================================================================
 # Cell 1: Simple "Hello World" test
 # Execute this cell to test your plugin installation
 
@@ -126,7 +123,7 @@ print("✅ LaTeX math renders in browser!")
 
 #%%
 # Cell 9: Quench Logo Animation
-# A flashy finale showcasing terminal animation and ANSI color support
+# Terminal animation and ANSI color support
 
 import time
 import sys
@@ -182,7 +179,7 @@ for frame in range(94):
     sys.stdout.write(f'\033[{len(logo_lines)}A')
 
     # Print each line with animated colors
-    for line in logo_lines:
+    for j, line in enumerate(logo_lines):
         # Clear the line
         sys.stdout.write('\033[2K')
 
@@ -190,7 +187,7 @@ for frame in range(94):
         for i, char in enumerate(line):
             # Create wave effect: gradient position shifts with frame
             # The subtraction creates leftward motion
-            gradient_pos = (i//6 - frame) % len(gradient_colors)
+            gradient_pos = (i//8 - frame - j//2) % len(gradient_colors)
             colored_line += gradient_colors[gradient_pos] + char + reset
 
         sys.stdout.write(colored_line + '\n')
