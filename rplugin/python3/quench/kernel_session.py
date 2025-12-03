@@ -712,6 +712,10 @@ class KernelSession:
                     # Mark kernel as dead for auto-restart functionality
                     self.is_dead = True
 
+                    # Drain the execution queue to prevent old cells from running after restart
+                    await self._drain_queue(reason="skipped")
+                    self._logger.info(f"Drained execution queue due to kernel death")
+
                     # Notify Frontend
                     from datetime import datetime, timezone
 
