@@ -223,7 +223,9 @@ class QuenchClient {
         this.autoscrollButton = null; // Reference to autoscroll toggle button
         this.isAutoscrollEnabled = true; // Track autoscroll state
         this.scrollThreshold = 100; // Pixels from bottom to consider "at bottom"
-        this.scrollDebounceTimer = null; // Timer for scroll debouncing
+        this.isProgrammaticScroll = false; // Track programmatic scrolls to ignore them
+        this.userScrollTimer = null; // Debounce timer for user scroll end detection
+        this.isUserScrolling = false; // Track active user scrolling state
         this.isKernelDataLoaded = false; // Track if kernel data is loaded
         this.loadingTimeout = null; // Timeout for loading fallback
         this.pollingIntervalId = null; // Interval ID for kernel polling
@@ -300,32 +302,42 @@ class QuenchClient {
     setupScrollHandling() {
         // Listen to scroll events to detect when user scrolls away from bottom
         window.addEventListener('scroll', () => {
-            // Clear any existing debounce timer
-            if (this.scrollDebounceTimer) {
-                clearTimeout(this.scrollDebounceTimer);
+            // Ignore our own programmatic scrolls
+            if (this.isProgrammaticScroll) {
+                return;
             }
 
-            // Set debounce timer (wait for scrolling to stop)
-            this.scrollDebounceTimer = setTimeout(() => {
-                this.checkScrollPosition();
-            }, 150); // 150ms debounce
+            // Mark that user is actively scrolling
+            this.isUserScrolling = true;
+
+            // Clear existing timer
+            if (this.userScrollTimer) {
+                clearTimeout(this.userScrollTimer);
+            }
+
+            // Wait for user to finish scrolling (150ms debounce)
+            this.userScrollTimer = setTimeout(() => {
+                this.isUserScrolling = false;
+
+                // Check final position after user stops scrolling
+                const scrollHeight = document.documentElement.scrollHeight;
+                const scrollTop = window.scrollY || document.documentElement.scrollTop;
+                const clientHeight = window.innerHeight;
+                const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+
+                const isAtBottom = distanceFromBottom <= this.scrollThreshold;
+
+                if (isAtBottom && !this.isAutoscrollEnabled) {
+                    // User scrolled back to bottom - re-enable autoscroll
+                    this.isAutoscrollEnabled = true;
+                    this.updateAutoscrollButton();
+                } else if (!isAtBottom && this.isAutoscrollEnabled) {
+                    // User scrolled away from bottom - disable autoscroll
+                    this.isAutoscrollEnabled = false;
+                    this.updateAutoscrollButton();
+                }
+            }, 150);
         }, { passive: true });
-    }
-
-    checkScrollPosition() {
-        // Calculate if we're at the bottom
-        const scrollHeight = document.documentElement.scrollHeight;
-        const scrollTop = window.scrollY || document.documentElement.scrollTop;
-        const clientHeight = window.innerHeight;
-        const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
-
-        const isAtBottom = distanceFromBottom <= this.scrollThreshold;
-
-        // If autoscroll is enabled and we're not at bottom, user scrolled away
-        if (this.isAutoscrollEnabled && !isAtBottom) {
-            this.isAutoscrollEnabled = false;
-            this.updateAutoscrollButton();
-        }
     }
 
     handleDropdownClick(e) {
@@ -1436,19 +1448,36 @@ class QuenchClient {
 
         // If the user just turned it on, scroll to bottom immediately
         if (this.isAutoscrollEnabled) {
+            // Mark this as a programmatic scroll so event handler ignores it
+            this.isProgrammaticScroll = true;
+
             window.scrollTo({
                 top: document.documentElement.scrollHeight,
                 behavior: 'smooth'
+            });
+
+            // Clear flag on next animation frame (after scroll event fires)
+            requestAnimationFrame(() => {
+                this.isProgrammaticScroll = false;
             });
         }
     }
 
     autoscroll() {
-        if (this.isAutoscrollEnabled) {
+        // Don't interrupt user if they're actively scrolling
+        if (this.isAutoscrollEnabled && !this.isUserScrolling) {
+            // Mark this as a programmatic scroll so event handler ignores it
+            this.isProgrammaticScroll = true;
+
             // Scroll to the absolute bottom of the page
             window.scrollTo({
                 top: document.documentElement.scrollHeight,
                 behavior: 'instant'
+            });
+
+            // Clear flag on next animation frame (after scroll event fires)
+            requestAnimationFrame(() => {
+                this.isProgrammaticScroll = false;
             });
         }
     }

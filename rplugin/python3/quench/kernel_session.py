@@ -247,7 +247,8 @@ class KernelSession:
 
         self.sequence_counter += 1
 
-        # Don't add status messages to cache - they're ephemeral state updates
+        # Add status messages to cache so they can be replayed when frontend reconnects
+        self.output_cache.append(status_message)
         await self.relay_queue.put((self.kernel_id, status_message))
         self._logger.debug(
             f"Sent cell status '{status}' for msg_id {msg_id[:8]} (seq {status_message['content']['sequence']})"
