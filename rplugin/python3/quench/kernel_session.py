@@ -5,6 +5,7 @@ import json
 import sys
 import subprocess
 from typing import Optional, Dict, Set, List
+from dataclasses import dataclass
 
 try:
     from jupyter_client import AsyncKernelManager, AsyncKernelClient
@@ -15,6 +16,15 @@ except ImportError:
     AsyncKernelManager = None
     AsyncKernelClient = None
     JUPYTER_CLIENT_AVAILABLE = False
+
+
+@dataclass
+class ExecutionRequest:
+    """Represents a queued cell execution request."""
+    msg_id: str
+    code: str
+    future: asyncio.Future
+    sequence_num: int  # For message ordering
 
 
 class KernelSession:
@@ -45,9 +55,14 @@ class KernelSession:
         self.created_at = __import__("datetime").datetime.now()
         self._logger = logging.getLogger(f"quench.kernel.{self.kernel_id[:8]}")
 
-        # Track kernel busy/idle state for cell status indicators
-        self.is_busy = False
-        self.pending_executions: Dict[str, str] = {}  # msg_id -> status
+        # New queue-based execution system
+        self.execution_queue: asyncio.Queue = asyncio.Queue()
+        self.current_execution: Optional[ExecutionRequest] = None
+        self.executor_task: Optional[asyncio.Task] = None
+        self.msg_id_map: Dict[str, str] = {}  # Maps kernel msg_id → our msg_id
+        self.sequence_counter: int = 0  # For message ordering
+        self.is_interrupting: bool = False  # Track interrupt state
+        self._idle_waiter: Optional[asyncio.Future] = None  # For waiting on kernel idle
 
         # Track kernel death state for auto-restart functionality
         self.is_dead = False
@@ -78,6 +93,13 @@ class KernelSession:
                 self.monitor_task.cancel()
                 try:
                     await asyncio.wait_for(self.monitor_task, timeout=1.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+
+            if self.executor_task and not self.executor_task.done():
+                self.executor_task.cancel()
+                try:
+                    await asyncio.wait_for(self.executor_task, timeout=1.0)
                 except (asyncio.CancelledError, asyncio.TimeoutError):
                     pass
 
@@ -121,6 +143,10 @@ class KernelSession:
 
             # Start the process monitoring task
             self.monitor_task = asyncio.create_task(self._monitor_process())
+
+            # Start the execution loop task
+            self.executor_task = asyncio.create_task(self._execution_loop())
+            self._logger.debug(f"Started execution loop for kernel {self.kernel_id[:8]}")
 
             self._logger.info(f"Kernel {self.kernel_id[:8]} (type: {effective_kernel_name}) started successfully")
 
@@ -166,19 +192,30 @@ class KernelSession:
             except Exception as e:
                 self._logger.warning(f"Monitor task for {self.kernel_id[:8]} had an error on cleanup: {e}")
 
-        # 4. Clean up references.
+        # 4. Cancel the executor task.
+        if self.executor_task and not self.executor_task.done():
+            self.executor_task.cancel()
+            try:
+                await asyncio.wait_for(self.executor_task, timeout=1.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+            except Exception as e:
+                self._logger.warning(f"Executor task for {self.kernel_id[:8]} had an error on cleanup: {e}")
+
+        # 5. Clean up references.
         self.client = None
         self.km = None
         self.listener_task = None
         self.monitor_task = None
+        self.executor_task = None
 
     async def _send_cell_status(self, msg_id: str, status: str):
         """
-        Send a cell status update message to the frontend.
+        Send a cell status update message to the frontend with sequence number for ordering.
 
         Args:
             msg_id: The original execute request message ID
-            status: One of 'queued', 'running', 'completed_ok', 'completed_error'
+            status: One of 'queued', 'running', 'completed_ok', 'completed_error', 'skipped'
         """
         from datetime import datetime, timezone
 
@@ -200,23 +237,32 @@ class KernelSession:
                 "date": datetime.now(timezone.utc),
                 "version": "5.3",
             },
-            "content": {"status": status},
+            "content": {
+                "status": status,
+                "sequence": self.sequence_counter  # Add sequence number for message ordering
+            },
             "metadata": {},
             "buffers": [],
         }
 
-        # Add to cache and relay
-        self.output_cache.append(status_message)
-        await self.relay_queue.put((self.kernel_id, status_message))
-        self._logger.debug(f"Sent cell status '{status}' for msg_id {msg_id[:8]}")
+        self.sequence_counter += 1
 
-    async def execute(self, code: str):
+        # Don't add status messages to cache - they're ephemeral state updates
+        await self.relay_queue.put((self.kernel_id, status_message))
+        self._logger.debug(
+            f"Sent cell status '{status}' for msg_id {msg_id[:8]} (seq {status_message['content']['sequence']})"
+        )
+
+    async def execute(self, code: str) -> str:
         """
-        Send code to the kernel's shell channel for execution.
-        If the kernel has died, automatically restart it before executing.
+        Queue code for execution. Returns immediately with msg_id.
+        Actual execution happens serially in _execution_loop.
 
         Args:
             code: The Python code to execute
+
+        Returns:
+            str: The message ID for tracking this execution
         """
         # Auto-restart kernel if it has died
         if self.is_dead:
@@ -259,86 +305,198 @@ class KernelSession:
         if not self.client:
             raise RuntimeError("Kernel client is not available. Call start() first.")
 
-        # Check if kernel is still alive before executing
-        if self.km and not await self.km.is_alive():
-            raise RuntimeError(f"Kernel {self.kernel_id[:8]} process has died. Cannot execute code.")
+        # Generate our own msg_id (kernel will generate its own later)
+        msg_id = uuid.uuid4().hex
 
-        try:
-            # First, get the msg_id that will be generated
-            msg_id = self.client.execute(code)
-            self._logger.debug(f"Executed code in kernel {self.kernel_id[:8]}, msg_id: {msg_id}")
+        # Create synthetic execute_input message immediately
+        from datetime import datetime, timezone
 
-            # Create a synthetic execute_input message for the frontend using the actual execute request ID
-            # This ensures the frontend has a cell to attach output to, using the same ID that output messages will reference
-            from datetime import datetime, timezone
-
-            execute_input_msg = {
-                "header": {
-                    "msg_id": f"synthetic_{msg_id}",  # Use a different ID for the execute_input message itself
-                    "msg_type": "execute_input",
-                    "username": "quench",
-                    "session": self.kernel_id,
-                    "date": datetime.now(timezone.utc),
-                    "version": "5.3",
-                },
+        execute_input_msg = {
+            "header": {
                 "msg_id": f"synthetic_{msg_id}",
                 "msg_type": "execute_input",
-                "parent_header": {
-                    "msg_id": msg_id,  # This is the key - output messages will reference this ID
-                    "msg_type": "execute_request",
-                    "username": "quench",
-                    "session": self.kernel_id,
-                    "date": datetime.now(timezone.utc),
-                    "version": "5.3",
-                },
-                "metadata": {},
-                "content": {"code": code, "execution_count": None},
-                "buffers": [],
-            }
+                "username": "quench",
+                "session": self.kernel_id,
+                "date": datetime.now(timezone.utc),
+                "version": "5.3",
+            },
+            "msg_id": f"synthetic_{msg_id}",
+            "msg_type": "execute_input",
+            "parent_header": {
+                "msg_id": msg_id,
+                "msg_type": "execute_request",
+                "username": "quench",
+                "session": self.kernel_id,
+                "date": datetime.now(timezone.utc),
+                "version": "5.3",
+            },
+            "metadata": {},
+            "content": {"code": code, "execution_count": None},
+            "buffers": [],
+        }
 
-            self._logger.debug(f"Creating synthetic execute_input with parent_msg_id: {msg_id}")
+        # Send execute_input to frontend immediately
+        self.output_cache.append(execute_input_msg)
+        await self.relay_queue.put((self.kernel_id, execute_input_msg))
 
-            # Add to cache and relay immediately
-            self.output_cache.append(execute_input_msg)
-            await self.relay_queue.put((self.kernel_id, execute_input_msg))
-            self._logger.debug(f"Created synthetic execute_input message for kernel {self.kernel_id[:8]}")
+        # Send "queued" status immediately
+        await self._send_cell_status(msg_id, "queued")
 
-            # Now send status messages after the cell has been created
-            # Track this execution and send queued status
-            self.pending_executions[msg_id] = "queued"
-            await self._send_cell_status(msg_id, "queued")
+        # Create execution request with Future
+        req = ExecutionRequest(
+            msg_id=msg_id,
+            code=code,
+            future=asyncio.Future(),
+            sequence_num=self.sequence_counter
+        )
+        self.sequence_counter += 1
 
-            # Wait for kernel to be available if it's busy
-            while self.is_busy:
-                await asyncio.sleep(0.1)
+        # Add to execution queue (non-blocking)
+        await self.execution_queue.put(req)
+        self._logger.debug(f"Queued execution {msg_id[:8]}, queue depth: {self.execution_queue.qsize()}")
 
-            # Send running status when execution begins
-            if msg_id in self.pending_executions:
-                self.pending_executions[msg_id] = "running"
-                await self._send_cell_status(msg_id, "running")
+        return msg_id
 
-            return msg_id
-        except Exception as e:
-            self._logger.error(f"Error executing code in kernel {self.kernel_id[:8]}: {e}")
-            raise
+    async def _execution_loop(self):
+        """
+        Serial execution loop. Processes one cell at a time from the queue.
+        This eliminates race conditions by ensuring only one cell is "running" at a time.
+        """
+        self._logger.info(f"Execution loop started for kernel {self.kernel_id[:8]}")
+
+        while True:
+            try:
+                # Wait for next execution request
+                req = await self.execution_queue.get()
+
+                # Check if kernel died while waiting
+                if self.is_dead:
+                    self._logger.warning(f"Kernel dead, skipping cell {req.msg_id[:8]}")
+                    await self._send_cell_status(req.msg_id, "skipped")
+                    self.execution_queue.task_done()
+                    continue
+
+                # Mark as current execution
+                self.current_execution = req
+
+                try:
+                    # Send "running" status (cell is now executing)
+                    await self._send_cell_status(req.msg_id, "running")
+
+                    # Send code to kernel - kernel generates its own msg_id
+                    kernel_msg_id = self.client.execute(req.code)
+
+                    # Map kernel's msg_id to our msg_id for correlation
+                    self.msg_id_map[kernel_msg_id] = req.msg_id
+
+                    self._logger.debug(
+                        f"Executing cell {req.msg_id[:8]} (kernel msg_id: {kernel_msg_id[:8]}), "
+                        f"queue depth: {self.execution_queue.qsize()}"
+                    )
+
+                    # Wait for completion (Future resolved by _listen_iopub)
+                    await req.future
+
+                    self._logger.debug(f"Cell {req.msg_id[:8]} completed")
+
+                except asyncio.CancelledError:
+                    # Task was cancelled (plugin shutdown)
+                    self._logger.info(f"Execution loop cancelled during {req.msg_id[:8]}")
+                    await self._send_cell_status(req.msg_id, "skipped")
+                    break
+
+                except Exception as e:
+                    self._logger.error(f"Execution loop error for {req.msg_id[:8]}: {e}")
+                    await self._send_cell_status(req.msg_id, "completed_error")
+
+                finally:
+                    self.current_execution = None
+                    self.execution_queue.task_done()
+
+            except asyncio.CancelledError:
+                self._logger.info("Execution loop cancelled")
+                break
+            except Exception as e:
+                self._logger.error(f"Unexpected execution loop error: {e}")
+                # Continue loop - don't crash on errors
+
+        self._logger.info(f"Execution loop stopped for kernel {self.kernel_id[:8]}")
 
     async def interrupt(self):
         """
-        Send an interrupt signal to the running kernel.
+        Send interrupt signal to kernel and wait for it to actually stop.
+        Drains execution queue and marks pending cells as skipped.
         """
         if not self.km:
             raise RuntimeError("Kernel manager is not available. Call start() first.")
 
         try:
+            self._logger.info(f"Interrupting kernel {self.kernel_id[:8]}")
+            self.is_interrupting = True
+
+            # Send interrupt signal to kernel
             await self.km.interrupt_kernel()
-            self._logger.info(f"Interrupted kernel {self.kernel_id[:8]}")
+
+            # Wait for kernel to actually go idle (with timeout)
+            try:
+                await asyncio.wait_for(self._wait_for_kernel_idle(), timeout=5.0)
+            except asyncio.TimeoutError:
+                self._logger.warning(f"Kernel {self.kernel_id[:8]} didn't go idle after interrupt")
+
+            # Drain the queue - mark all pending cells as skipped
+            await self._drain_queue(reason="skipped")
+
+            self.is_interrupting = False
+            self._logger.info(f"Kernel {self.kernel_id[:8]} interrupted, queue drained")
+
         except Exception as e:
+            self.is_interrupting = False
             self._logger.error(f"Error interrupting kernel {self.kernel_id[:8]}: {e}")
             raise
 
+    async def _wait_for_kernel_idle(self):
+        """
+        Wait for kernel to transition to idle state.
+        Used after interrupt to ensure kernel actually stopped.
+        """
+        # Create a future that will be resolved when we see idle status
+        idle_future = asyncio.Future()
+        self._idle_waiter = idle_future
+
+        # Wait for the future to be resolved (by _listen_iopub)
+        await idle_future
+
+        self._idle_waiter = None
+
+    async def _drain_queue(self, reason: str = "skipped"):
+        """
+        Empty the execution queue and mark all pending cells with given status.
+        Used during interrupt/restart to clean up queued cells.
+        """
+        # Cancel current execution if any
+        if self.current_execution and not self.current_execution.future.done():
+            if not self.current_execution.future.cancelled():
+                self.current_execution.future.cancel()
+                await self._send_cell_status(self.current_execution.msg_id, reason)
+            self.current_execution = None
+
+        # Drain all queued cells
+        drained_count = 0
+        while not self.execution_queue.empty():
+            try:
+                req = self.execution_queue.get_nowait()
+                await self._send_cell_status(req.msg_id, reason)
+                self.execution_queue.task_done()
+                drained_count += 1
+            except asyncio.QueueEmpty:
+                break
+
+        if drained_count > 0:
+            self._logger.info(f"Drained {drained_count} cells from queue (reason: {reason})")
+
     async def restart(self):
         """
-        Restart the kernel and clear the output cache.
+        Restart kernel and clear execution queue.
         Sends a notification to the frontend about the restart.
         """
         if not self.km:
@@ -347,8 +505,49 @@ class KernelSession:
         try:
             self._logger.info(f"Restarting kernel {self.kernel_id[:8]}")
 
+            # Drain queue BEFORE restarting
+            await self._drain_queue(reason="skipped")
+
+            # Cancel existing tasks before restart
+            if self.listener_task and not self.listener_task.done():
+                self.listener_task.cancel()
+                try:
+                    await asyncio.wait_for(self.listener_task, timeout=1.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+
+            if self.monitor_task and not self.monitor_task.done():
+                self.monitor_task.cancel()
+                try:
+                    await asyncio.wait_for(self.monitor_task, timeout=1.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+
+            if self.executor_task and not self.executor_task.done():
+                self.executor_task.cancel()
+                try:
+                    await asyncio.wait_for(self.executor_task, timeout=1.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+
             # Restart the kernel
             await self.km.restart_kernel()
+
+            # Wait for the client to reconnect to restarted kernel
+            await self.client.wait_for_ready(timeout=30)
+
+            # Clear stale message ID mappings from old kernel
+            self.msg_id_map.clear()
+
+            # Restart the IOPub listener task
+            self.listener_task = asyncio.create_task(self._listen_iopub())
+
+            # Restart the process monitoring task
+            self.monitor_task = asyncio.create_task(self._monitor_process())
+
+            # Restart the execution loop task
+            self.executor_task = asyncio.create_task(self._execution_loop())
+            self._logger.debug(f"Restarted execution loop for kernel {self.kernel_id[:8]}")
 
             # Note: We preserve the output cache to maintain execution history
             # Users can still see previous outputs even after restart
@@ -382,8 +581,8 @@ class KernelSession:
 
     async def _listen_iopub(self):
         """
-        Continuously listen to the kernel's IOPub channel for messages.
-        Appends messages to output_cache and forwards them to the relay_queue.
+        Listen to IOPub channel for kernel messages.
+        Resolves Futures when cells complete.
         """
         if not self.client:
             return
@@ -395,68 +594,79 @@ class KernelSession:
                 try:
                     # Wait for messages from the IOPub channel
                     message = await self.client.get_iopub_msg(timeout=1.0)
+                    msg_type = message.get("msg_type")
+                    kernel_msg_id = message.get("parent_header", {}).get("msg_id")
 
-                    # Skip execute_input messages since we create our own synthetic ones
-                    # This prevents duplicate cells in the frontend
-                    if message.get("msg_type") == "execute_input":
-                        self._logger.debug(f"Skipping real execute_input message from kernel {self.kernel_id[:8]}")
+                    # Skip our own synthetic execute_input messages
+                    if msg_type == "execute_input" and message.get("header", {}).get("msg_id", "").startswith("synthetic_"):
                         continue
 
-                    # Handle kernel status messages to track busy/idle state
-                    if message.get("msg_type") == "status":
+                    # Translate kernel msg_id to our msg_id
+                    our_msg_id = self.msg_id_map.get(kernel_msg_id, kernel_msg_id)
+
+                    # Update parent_header with our msg_id for frontend
+                    if kernel_msg_id in self.msg_id_map:
+                        message["parent_header"]["msg_id"] = our_msg_id
+
+                    # Handle status messages
+                    if msg_type == "status":
                         execution_state = message.get("content", {}).get("execution_state")
-                        if execution_state == "busy":
-                            self.is_busy = True
-                            self._logger.debug(f"Kernel {self.kernel_id[:8]} is now busy")
-                        elif execution_state == "idle":
-                            self.is_busy = False
-                            self._logger.debug(f"Kernel {self.kernel_id[:8]} is now idle")
 
-                            # Check if this corresponds to a completed execution
-                            parent_msg_id = message.get("parent_header", {}).get("msg_id")
-                            if parent_msg_id and parent_msg_id in self.pending_executions:
-                                # Assume successful completion unless we've seen an error
-                                # We'll handle errors in the error message handler
-                                await self._send_cell_status(parent_msg_id, "completed_ok")
-                                del self.pending_executions[parent_msg_id]
+                        if execution_state == "idle":
+                            # Resolve idle waiter if waiting for interrupt
+                            if self._idle_waiter and not self._idle_waiter.done():
+                                self._idle_waiter.set_result(True)
 
-                    # Handle error messages to mark cells as completed with error
-                    elif message.get("msg_type") == "error":
-                        parent_msg_id = message.get("parent_header", {}).get("msg_id")
-                        if parent_msg_id and parent_msg_id in self.pending_executions:
-                            await self._send_cell_status(parent_msg_id, "completed_error")
-                            del self.pending_executions[parent_msg_id]
+                            # If this idle corresponds to current execution, mark complete
+                            if self.current_execution and kernel_msg_id in self.msg_id_map:
+                                if self.msg_id_map[kernel_msg_id] == self.current_execution.msg_id:
+                                    if not self.current_execution.future.done():
+                                        # Check if there was an error (tracked via error handler below)
+                                        if not hasattr(self.current_execution, '_had_error'):
+                                            await self._send_cell_status(self.current_execution.msg_id, "completed_ok")
+                                        # Resolve the future unless it was cancelled
+                                        if not self.current_execution.future.cancelled():
+                                            self.current_execution.future.set_result(True)
+
+                                    # Clean up msg_id mapping
+                                    if kernel_msg_id in self.msg_id_map:
+                                        del self.msg_id_map[kernel_msg_id]
+
+                    # Handle error messages
+                    elif msg_type == "error":
+                        if self.current_execution and kernel_msg_id in self.msg_id_map:
+                            if self.msg_id_map[kernel_msg_id] == self.current_execution.msg_id:
+                                # Mark that this execution had an error
+                                self.current_execution._had_error = True
+                                await self._send_cell_status(self.current_execution.msg_id, "completed_error")
 
                     # Cache coalescing: merge consecutive stream messages in the cache
                     # to reduce reload time, while still sending granular updates to
                     # the relay queue for real-time feedback.
                     should_append_to_cache = True
 
-                    if message.get("msg_type") == "stream" and self.output_cache:
+                    if msg_type == "stream" and self.output_cache:
                         last_msg = self.output_cache[-1]
 
-                        # Check if compatible for merging: same msg_type, stream name, and parent msg_id
+                        # Check if compatible for merging
                         if (
                             last_msg.get("msg_type") == "stream"
                             and last_msg.get("content", {}).get("name") == message.get("content", {}).get("name")
-                            and last_msg.get("parent_header", {}).get("msg_id")
-                            == message.get("parent_header", {}).get("msg_id")
+                            and last_msg.get("parent_header", {}).get("msg_id") == our_msg_id
                         ):
-
                             # Merge text into the existing cache entry
                             last_msg["content"]["text"] += message["content"]["text"]
                             should_append_to_cache = False
                             self._logger.debug(f"Coalesced stream message into cache for kernel {self.kernel_id[:8]}")
 
+                    # Add to cache and relay
                     if should_append_to_cache:
                         self.output_cache.append(message)
 
-                    # Always forward the original granular message to relay queue
-                    # for real-time streaming feedback to connected clients
                     await self.relay_queue.put((self.kernel_id, message))
 
                     self._logger.debug(
-                        f"Relayed message from kernel {self.kernel_id[:8]}: {message.get('msg_type', 'unknown')}"
+                        f"Relayed message from kernel {self.kernel_id[:8]}: {msg_type}"
                     )
 
                 except asyncio.TimeoutError:

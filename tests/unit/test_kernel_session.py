@@ -117,10 +117,16 @@ class TestKernelSession:
         mock_client.execute = Mock(return_value="msg-id-123")
         session.client = mock_client
 
-        code = "print('hello world')"
-        await session.execute(code)
+        # Start the execution loop
+        session.executor_task = asyncio.create_task(session._execution_loop())
 
-        # Verify execute was called with correct parameters
+        code = "print('hello world')"
+        msg_id = await session.execute(code)
+
+        # Wait a bit for execution loop to process
+        await asyncio.sleep(0.1)
+
+        # Verify execute was called by the execution loop
         mock_client.execute.assert_called_once_with(code)
 
         # Verify synthetic execute_input message was sent first
@@ -129,14 +135,22 @@ class TestKernelSession:
         assert kernel_id == session.kernel_id
         assert message["msg_type"] == "execute_input"
         assert message["content"]["code"] == code
+        assert message["parent_header"]["msg_id"] == msg_id  # Should use our generated msg_id
 
         # Verify queued status message was sent next
         assert not self.relay_queue.empty()
+
+        # Clean up executor task
+        session.executor_task.cancel()
+        try:
+            await session.executor_task
+        except asyncio.CancelledError:
+            pass
         kernel_id, status_message = await self.relay_queue.get()
         assert kernel_id == session.kernel_id
         assert status_message["msg_type"] == "quench_cell_status"
         assert status_message["content"]["status"] == "queued"
-        assert status_message["parent_header"]["msg_id"] == "msg-id-123"
+        assert status_message["parent_header"]["msg_id"] == msg_id  # Use our generated msg_id
 
         # Verify running status message was sent last
         assert not self.relay_queue.empty()
@@ -144,7 +158,7 @@ class TestKernelSession:
         assert kernel_id == session.kernel_id
         assert status_message["msg_type"] == "quench_cell_status"
         assert status_message["content"]["status"] == "running"
-        assert status_message["parent_header"]["msg_id"] == "msg-id-123"
+        assert status_message["parent_header"]["msg_id"] == msg_id  # Use our generated msg_id
 
     @pytest.mark.asyncio
     async def test_kernel_session_execute_without_client(self):
@@ -382,6 +396,12 @@ class TestKernelSession:
             # Verify start() was called (auto-restart triggered)
             assert start_called == True
 
+            # Start the execution loop to process the queued request
+            session.executor_task = asyncio.create_task(session._execution_loop())
+
+            # Wait for execution loop to process the queued execution
+            await asyncio.sleep(0.1)
+
         # Verify is_dead flag was cleared
         assert session.is_dead == False
 
@@ -407,6 +427,13 @@ class TestKernelSession:
 
         # Verify execute was called on the client after restart
         assert session.client.execute.called
+
+        # Clean up executor task
+        session.executor_task.cancel()
+        try:
+            await session.executor_task
+        except asyncio.CancelledError:
+            pass
 
     @pytest.mark.asyncio
     async def test_kernel_session_shutdown_success(self):

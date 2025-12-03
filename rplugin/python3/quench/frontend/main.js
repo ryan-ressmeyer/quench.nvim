@@ -233,6 +233,10 @@ class QuenchClient {
         this.connectionState = 'disconnected';
         this.errorTimeout = null; // To manage error flash persistence
 
+        // Buffers for messages that arrive out of order
+        this.pendingStatuses = new Map();  // Buffered status updates
+        this.pendingOutputs = new Map();   // Buffered output messages
+
         this.init();
     }
 
@@ -595,30 +599,145 @@ class QuenchClient {
         }
     }
 
+    /**
+     * Cell state machine with transition validation and sequence ordering.
+     *
+     * State transitions:
+     *   queued → running, skipped
+     *   running → completed_ok, completed_error, skipped
+     *   completed_ok, completed_error, skipped → (TERMINAL)
+     */
+    setCellState(cellId, newState, sequence) {
+        const cell = this.cells.get(cellId);
+        if (!cell) {
+            console.warn(`setCellState: Cell ${cellId.slice(0,8)} not found`);
+            return false;
+        }
+
+        // Get current state from cell data attribute
+        const currentState = cell.dataset.cellState || 'queued';
+        const currentSequence = parseInt(cell.dataset.cellSequence || '0', 10);
+
+        // Validate sequence number (reject old messages)
+        if (sequence !== undefined && sequence < currentSequence) {
+            console.warn(
+                `[State Machine] Rejecting old message for ${cellId.slice(0,8)}: ` +
+                `sequence ${sequence} < current ${currentSequence} ` +
+                `(current state: ${currentState}, attempted: ${newState})`
+            );
+            return false;
+        }
+
+        // Terminal states cannot be exited
+        const terminalStates = ['completed_ok', 'completed_error', 'skipped'];
+        if (terminalStates.includes(currentState)) {
+            console.warn(
+                `[State Machine] Invalid transition for ${cellId.slice(0,8)}: ` +
+                `Cannot exit terminal state "${currentState}" to "${newState}" ` +
+                `(sequence: ${sequence})`
+            );
+            return false;
+        }
+
+        // Define valid transitions
+        const validTransitions = {
+            'queued': ['running', 'skipped'],
+            'running': ['completed_ok', 'completed_error', 'skipped']
+        };
+
+        // Check if transition is valid
+        const allowedNextStates = validTransitions[currentState] || [];
+        if (!allowedNextStates.includes(newState)) {
+            console.warn(
+                `[State Machine] Invalid transition for ${cellId.slice(0,8)}: ` +
+                `"${currentState}" → "${newState}" not allowed ` +
+                `(valid: [${allowedNextStates.join(', ')}], sequence: ${sequence})`
+            );
+            return false;
+        }
+
+        // Valid transition - update state
+        cell.dataset.cellState = newState;
+        if (sequence !== undefined) {
+            cell.dataset.cellSequence = sequence.toString();
+        }
+
+        // Update sidebar CSS
+        const sidebar = cell.querySelector('.cell-sidebar');
+        if (sidebar) {
+            // Replace status class
+            sidebar.className = sidebar.className.replace(/status-\w+(-\w+)?/g, '');
+            sidebar.className = sidebar.className.trim() + ` status-${newState.replace(/_/g, '-')}`;
+
+            console.log(
+                `[State Machine] ${cellId.slice(0,8)}: ${currentState} → ${newState} ` +
+                `(sequence: ${sequence})`
+            );
+        }
+
+        return true;
+    }
+
     handleExecuteInput(message) {
         const msgId = message.header.msg_id;
         const parentMsgId = message.parent_header?.msg_id;
         const code = message.content?.code || '';
-        
+
         console.log(`Execute input: msg_id=${msgId?.slice(0,8)}, parent=${parentMsgId?.slice(0,8)}, code length=${code.length}`);
-        
-        // The execute_input message's parent_header.msg_id is the original execute request ID
-        // This is what all output messages (stream, result, etc.) will reference
-        if (parentMsgId) {
-            console.log(`Creating cell with ID: ${parentMsgId.slice(0,8)}`);
-            const cellElement = this.createCell(parentMsgId, code);
-            this.cells.set(parentMsgId, cellElement);
 
-            console.log(`Cell created, total cells: ${this.cells.size}`);
-
-            // Add to the output area
-            this.outputArea.appendChild(cellElement);
-
-            // Auto-scroll to bottom if enabled
-            this.autoscroll();
-        } else {
+        if (!parentMsgId) {
             console.warn('Execute input message without parent_header.msg_id:', message);
+            return;
         }
+
+        // Check if cell already exists (shouldn't happen, but handle gracefully)
+        if (this.cells.has(parentMsgId)) {
+            console.log(`Cell ${parentMsgId.slice(0,8)} already exists, skipping creation`);
+            return;
+        }
+
+        console.log(`Creating cell with ID: ${parentMsgId.slice(0,8)}`);
+        const cellElement = this.createCell(parentMsgId, code);
+
+        // Initialize state machine properties
+        cellElement.dataset.cellState = 'queued';  // Initialize state
+        cellElement.dataset.cellSequence = '0';    // Initialize sequence
+
+        // Add to cells map and DOM
+        this.cells.set(parentMsgId, cellElement);
+        this.outputArea.appendChild(cellElement);
+
+        console.log(`Cell created, total cells: ${this.cells.size}`);
+
+        // Check for buffered status update
+        if (this.pendingStatuses && this.pendingStatuses.has(parentMsgId)) {
+            const buffered = this.pendingStatuses.get(parentMsgId);
+            console.log(`Applying buffered status for ${parentMsgId.slice(0,8)}: ${buffered.status}`);
+            this.setCellState(parentMsgId, buffered.status, buffered.sequence);
+            this.pendingStatuses.delete(parentMsgId);
+        }
+
+        // Flush any buffered outputs that arrived before cell was created
+        if (this.pendingOutputs && this.pendingOutputs.has(parentMsgId)) {
+            const bufferedOutputs = this.pendingOutputs.get(parentMsgId);
+            console.log(`Flushing ${bufferedOutputs.length} buffered outputs for ${parentMsgId.slice(0,8)}`);
+
+            for (const bufferedMsg of bufferedOutputs) {
+                // Re-dispatch buffered message now that cell exists
+                if (bufferedMsg.msg_type === 'stream') {
+                    this.handleStream(bufferedMsg);
+                } else if (bufferedMsg.msg_type === 'display_data' || bufferedMsg.msg_type === 'execute_result') {
+                    this.handleDisplayData(bufferedMsg);
+                } else if (bufferedMsg.msg_type === 'error') {
+                    this.handleError(bufferedMsg);
+                }
+            }
+
+            this.pendingOutputs.delete(parentMsgId);
+        }
+
+        // Auto-scroll to bottom if enabled
+        this.autoscroll();
     }
 
     handleStream(message) {
@@ -628,17 +747,15 @@ class QuenchClient {
             return;
         }
 
-        // Create a cell on-demand if one doesn't exist
+        // Buffer output if cell doesn't exist yet
         if (!this.cells.has(parentMsgId)) {
-            const cellElement = this.createCell(parentMsgId, '# Code executed previously');
-            this.cells.set(parentMsgId, cellElement);
-            this.outputArea.appendChild(cellElement);
+            console.warn(`Stream output arrived before cell ${parentMsgId.slice(0,8)}, buffering...`);
 
-            // Set the sidebar to running state since we're getting output
-            const sidebar = cellElement.querySelector('.cell-sidebar');
-            if (sidebar) {
-                sidebar.className = 'cell-sidebar status-running';
+            if (!this.pendingOutputs.has(parentMsgId)) {
+                this.pendingOutputs.set(parentMsgId, []);
             }
+            this.pendingOutputs.get(parentMsgId).push(message);
+            return;
         }
 
         const cell = this.cells.get(parentMsgId);
@@ -711,19 +828,16 @@ class QuenchClient {
             console.warn('Display data message without parent_header.msg_id:', message);
             return;
         }
-        
-        // Create a cell on-demand if one doesn't exist for this parent message ID
-        if (!this.cells.has(parentMsgId)) {
-            console.log(`Creating on-demand cell for orphaned display data message: ${parentMsgId.slice(0,8)}`);
-            const cellElement = this.createCell(parentMsgId, '# Code executed previously');
-            this.cells.set(parentMsgId, cellElement);
-            this.outputArea.appendChild(cellElement);
 
-            // Set the sidebar to running state since we're getting output
-            const sidebar = cellElement.querySelector('.cell-sidebar');
-            if (sidebar) {
-                sidebar.className = 'cell-sidebar status-running';
+        // Buffer output if cell doesn't exist yet
+        if (!this.cells.has(parentMsgId)) {
+            console.warn(`Display data arrived before cell ${parentMsgId.slice(0,8)}, buffering...`);
+
+            if (!this.pendingOutputs.has(parentMsgId)) {
+                this.pendingOutputs.set(parentMsgId, []);
             }
+            this.pendingOutputs.get(parentMsgId).push(message);
+            return;
         }
         
         const cell = this.cells.get(parentMsgId);
@@ -746,18 +860,15 @@ class QuenchClient {
             return;
         }
 
-        // Create a cell on-demand if one doesn't exist for this parent message ID
+        // Buffer output if cell doesn't exist yet
         if (!this.cells.has(parentMsgId)) {
-            console.log(`Creating on-demand cell for orphaned error message: ${parentMsgId.slice(0,8)}`);
-            const cellElement = this.createCell(parentMsgId, '# Code executed previously');
-            this.cells.set(parentMsgId, cellElement);
-            this.outputArea.appendChild(cellElement);
+            console.warn(`Error message arrived before cell ${parentMsgId.slice(0,8)}, buffering...`);
 
-            // Set the sidebar to error state since this is an error message
-            const sidebar = cellElement.querySelector('.cell-sidebar');
-            if (sidebar) {
-                sidebar.className = 'cell-sidebar status-completed-error';
+            if (!this.pendingOutputs.has(parentMsgId)) {
+                this.pendingOutputs.set(parentMsgId, []);
             }
+            this.pendingOutputs.get(parentMsgId).push(message);
+            return;
         }
 
         const cell = this.cells.get(parentMsgId);
@@ -837,33 +948,32 @@ class QuenchClient {
             console.warn('Cell status message without parent_header.msg_id:', message);
             return;
         }
-        
+
         const status = message.content?.status;
         if (!status) {
             console.warn('Cell status message without status:', message);
             return;
         }
-        
-        console.log(`Cell status update: ${parentMsgId.slice(0,8)} -> ${status}`);
-        
-        // Find the cell element
+
+        const sequence = message.content?.sequence;
+
+        console.log(`Cell status update: ${parentMsgId.slice(0,8)} -> ${status} (seq: ${sequence})`);
+
+        // Find cell - if not found, cell hasn't been created yet
         const cell = this.cells.get(parentMsgId);
         if (!cell) {
-            console.warn(`Cell not found for status update: ${parentMsgId.slice(0,8)}`);
+            console.warn(`Cell not found for status update: ${parentMsgId.slice(0,8)}, buffering...`);
+
+            // Buffer status update for when cell arrives
+            if (!this.pendingStatuses) {
+                this.pendingStatuses = new Map();
+            }
+            this.pendingStatuses.set(parentMsgId, { status, sequence });
             return;
         }
-        
-        // Update the sidebar status
-        const sidebar = cell.querySelector('.cell-sidebar');
-        if (sidebar) {
-            // Remove existing status classes
-            sidebar.className = sidebar.className.replace(/status-\w+/g, '');
-            // Add new status class
-            sidebar.className += ` status-${status.replace('_', '-')}`;
-            console.log(`Updated cell ${parentMsgId.slice(0,8)} sidebar to ${status}`);
-        } else {
-            console.warn(`Sidebar not found in cell ${parentMsgId.slice(0,8)}`);
-        }
+
+        // Apply state transition via state machine
+        this.setCellState(parentMsgId, status, sequence);
     }
 
     handleKernelRestarted(message) {
