@@ -21,6 +21,7 @@ except ImportError:
 @dataclass
 class ExecutionRequest:
     """Represents a queued cell execution request."""
+
     msg_id: str
     code: str
     future: asyncio.Future
@@ -241,7 +242,7 @@ class KernelSession:
             },
             "content": {
                 "status": status,
-                "sequence": self.sequence_counter  # Add sequence number for message ordering
+                "sequence": self.sequence_counter,  # Add sequence number for message ordering
             },
             "metadata": {},
             "buffers": [],
@@ -346,12 +347,7 @@ class KernelSession:
         await self._send_cell_status(msg_id, "queued")
 
         # Create execution request with Future
-        req = ExecutionRequest(
-            msg_id=msg_id,
-            code=code,
-            future=asyncio.Future(),
-            sequence_num=self.sequence_counter
-        )
+        req = ExecutionRequest(msg_id=msg_id, code=code, future=asyncio.Future(), sequence_num=self.sequence_counter)
         self.sequence_counter += 1
 
         # Add to execution queue (non-blocking)
@@ -603,7 +599,9 @@ class KernelSession:
                     kernel_msg_id = message.get("parent_header", {}).get("msg_id")
 
                     # Skip our own synthetic execute_input messages
-                    if msg_type == "execute_input" and message.get("header", {}).get("msg_id", "").startswith("synthetic_"):
+                    if msg_type == "execute_input" and message.get("header", {}).get("msg_id", "").startswith(
+                        "synthetic_"
+                    ):
                         continue
 
                     # Translate kernel msg_id to our msg_id
@@ -627,7 +625,7 @@ class KernelSession:
                                 if self.msg_id_map[kernel_msg_id] == self.current_execution.msg_id:
                                     if not self.current_execution.future.done():
                                         # Check if there was an error (tracked via error handler below)
-                                        if not hasattr(self.current_execution, '_had_error'):
+                                        if not hasattr(self.current_execution, "_had_error"):
                                             await self._send_cell_status(self.current_execution.msg_id, "completed_ok")
                                         # Resolve the future unless it was cancelled
                                         if not self.current_execution.future.cancelled():
@@ -670,9 +668,7 @@ class KernelSession:
 
                     await self.relay_queue.put((self.kernel_id, message))
 
-                    self._logger.debug(
-                        f"Relayed message from kernel {self.kernel_id[:8]}: {msg_type}"
-                    )
+                    self._logger.debug(f"Relayed message from kernel {self.kernel_id[:8]}: {msg_type}")
 
                 except asyncio.TimeoutError:
                     # Timeout is expected, continue listening
