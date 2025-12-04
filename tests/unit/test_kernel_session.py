@@ -27,8 +27,7 @@ async def cleanup_all_tasks():
     try:
         loop = asyncio.get_running_loop()
         pending_tasks = [
-            task for task in asyncio.all_tasks(loop)
-            if not task.done() and task is not asyncio.current_task()
+            task for task in asyncio.all_tasks(loop) if not task.done() and task is not asyncio.current_task()
         ]
 
         if pending_tasks:
@@ -37,10 +36,7 @@ async def cleanup_all_tasks():
 
             # Add 2-second timeout to prevent indefinite hanging
             try:
-                await asyncio.wait_for(
-                    asyncio.gather(*pending_tasks, return_exceptions=True),
-                    timeout=2.0
-                )
+                await asyncio.wait_for(asyncio.gather(*pending_tasks, return_exceptions=True), timeout=2.0)
             except asyncio.TimeoutError:
                 pass  # Tasks didn't cancel in time, but we tried
     except RuntimeError:
@@ -381,6 +377,7 @@ class TestKernelSession:
 
         # Mock asyncio.sleep to make the monitor loop run faster
         original_sleep = asyncio.sleep
+
         async def fast_sleep(delay):
             if delay > 1:  # Mock the 2-second sleep in _monitor_process
                 await original_sleep(0.01)
@@ -388,7 +385,7 @@ class TestKernelSession:
                 await original_sleep(delay)
 
         # Start the monitoring task with mocked sleep
-        with patch('asyncio.sleep', side_effect=fast_sleep):
+        with patch("asyncio.sleep", side_effect=fast_sleep):
             monitor_task = asyncio.create_task(session._monitor_process())
 
             try:
@@ -409,7 +406,10 @@ class TestKernelSession:
                 assert kernel_id == session.kernel_id
                 assert message["msg_type"] == "kernel_died"
                 assert message["content"]["status"] == "dead"
-                assert "crashed" in message["content"]["reason"].lower() or "terminated" in message["content"]["reason"].lower()
+                assert (
+                    "crashed" in message["content"]["reason"].lower()
+                    or "terminated" in message["content"]["reason"].lower()
+                )
 
                 # Verify death message was also added to output cache
                 assert len(session.output_cache) == 1
