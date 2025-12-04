@@ -366,6 +366,8 @@ class TestKernelSession:
         # Mock kernel manager that reports as dead
         mock_km = AsyncMock()
         mock_client = AsyncMock()
+        # stop_channels is synchronous in the real jupyter_client
+        mock_client.stop_channels = Mock()
 
         # First check returns True (alive), second returns False (dead)
         # This simulates kernel dying during monitoring

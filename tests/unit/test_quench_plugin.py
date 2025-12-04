@@ -137,6 +137,10 @@ class TestQuenchPlugin:
 
             # Mock kernel manager
             mock_kernel_manager = AsyncMock()
+            mock_kernel_manager.buffer_to_kernel_map = {}  # Empty dict for new buffer
+            mock_kernel_manager.get_kernel_choices = Mock(return_value=[
+                {"value": "python3", "is_running": False, "kernel_choice": "python3"}
+            ])
             mock_kernel_manager.get_or_create_session.return_value = mock_session
             MockKernelManager.return_value = mock_kernel_manager
 
@@ -173,6 +177,10 @@ class TestQuenchPlugin:
 
             # Mock kernel manager
             mock_kernel_manager = AsyncMock()
+            mock_kernel_manager.buffer_to_kernel_map = {}  # Empty dict for new buffer
+            mock_kernel_manager.get_kernel_choices = Mock(return_value=[
+                {"value": "python3", "is_running": False, "kernel_choice": "python3"}
+            ])
             mock_kernel_manager.get_or_create_session.return_value = mock_session
             MockKernelManager.return_value = mock_kernel_manager
 
@@ -238,6 +246,10 @@ class TestQuenchPlugin:
 
             # Mock kernel manager
             mock_kernel_manager = AsyncMock()
+            mock_kernel_manager.buffer_to_kernel_map = {}  # Empty dict for new buffer
+            mock_kernel_manager.get_kernel_choices = Mock(return_value=[
+                {"value": "python3", "is_running": False, "kernel_choice": "python3"}
+            ])
             mock_kernel_manager.get_or_create_session.return_value = mock_session
             MockKernelManager.return_value = mock_kernel_manager
 
