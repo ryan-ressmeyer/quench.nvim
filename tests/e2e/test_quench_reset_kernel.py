@@ -63,13 +63,12 @@ async def test_quench_reset_kernel():
         nvim_instance.add_command("normal! 3G")  # Go to first cell
         nvim_instance.add_command('call feedkeys("1\\<CR>", "t")')  # Select first kernel option
         nvim_instance.add_command("QuenchRunCell")  # Execute first cell
-        nvim_instance.add_command("sleep 2")  # Give code time to execute
 
         # Reset kernel and test variable access
         nvim_instance.add_command("QuenchResetKernel")  # Reset kernel
-        nvim_instance.add_command("sleep 1")  # Wait for reset
-        nvim_instance.add_command("normal! 8G")  # Go to second cell
+        nvim_instance.add_command("sleep 5 | normal! 8G")  # Wait for reset and position cursor
         nvim_instance.add_command("QuenchRunCell")  # Execute second cell
+        nvim_instance.add_command("sleep 3")  # Wait for second cell execution
 
         # Step 4: Execute all commands and wait for completion
         print("Executing all commands...")
