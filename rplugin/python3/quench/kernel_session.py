@@ -132,6 +132,8 @@ class KernelSession:
                 "metadata": {},
                 "buffers": [],
             }
+            # Add to cache so it's replayed when frontend reconnects
+            self.output_cache.append(starting_msg)
             await self.relay_queue.put((self.kernel_id, starting_msg))
             self._logger.debug(f"Broadcast 'starting' status for kernel {self.kernel_id[:8]}")
 
@@ -571,6 +573,8 @@ class KernelSession:
                 "buffers": [],
             }
 
+            # Add to cache so it's replayed when frontend reconnects
+            self.output_cache.append(restart_message)
             # Add the message to the relay queue
             await self.relay_queue.put((self.kernel_id, restart_message))
 
@@ -730,6 +734,8 @@ class KernelSession:
                         "msg_type": "kernel_died",
                         "content": {"reason": "Process crashed or was terminated by OS", "status": "dead"},
                     }
+                    # Add to cache so it's replayed when frontend reconnects
+                    self.output_cache.append(death_msg)
                     await self.relay_queue.put((self.kernel_id, death_msg))
 
                     # Clean up the client and kernel manager references

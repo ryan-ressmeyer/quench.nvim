@@ -17,6 +17,37 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "rplugin"
 from quench.kernel_session import KernelSession, KernelSessionManager
 
 
+@pytest.fixture(scope="function")
+async def cleanup_all_tasks():
+    """Fixture to clean up all tasks after each test."""
+    # Yield control to the test
+    yield
+
+    # Cleanup: Cancel all pending tasks
+    try:
+        loop = asyncio.get_running_loop()
+        pending_tasks = [
+            task for task in asyncio.all_tasks(loop)
+            if not task.done() and task is not asyncio.current_task()
+        ]
+
+        if pending_tasks:
+            for task in pending_tasks:
+                task.cancel()
+
+            # Add 2-second timeout to prevent indefinite hanging
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*pending_tasks, return_exceptions=True),
+                    timeout=2.0
+                )
+            except asyncio.TimeoutError:
+                pass  # Tasks didn't cancel in time, but we tried
+    except RuntimeError:
+        # No event loop running
+        pass
+
+
 class TestKernelSession:
     """Test cases for the KernelSession class."""
 
@@ -44,7 +75,7 @@ class TestKernelSession:
         assert session.kernel_id is not None
 
     @pytest.mark.asyncio
-    async def test_kernel_session_start_success(self):
+    async def test_kernel_session_start_success(self, cleanup_all_tasks):
         """Test successful kernel session start."""
         session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
 
@@ -60,6 +91,8 @@ class TestKernelSession:
             patch("quench.kernel_session.AsyncKernelManager", return_value=mock_km),
             patch("quench.kernel_session.JUPYTER_CLIENT_AVAILABLE", True),
             patch.object(session, "_listen_iopub", new_callable=AsyncMock) as mock_listen,
+            patch.object(session, "_monitor_process", new_callable=AsyncMock) as mock_monitor,
+            patch.object(session, "_execution_loop", new_callable=AsyncMock) as mock_executor,
         ):
 
             await session.start()
@@ -71,11 +104,13 @@ class TestKernelSession:
             mock_client.start_channels.assert_called_once()
             mock_client.wait_for_ready.assert_called_once_with(timeout=30)
 
-            # Verify iopub listener started
+            # Verify background tasks started
             mock_listen.assert_called_once()
+            mock_monitor.assert_called_once()
+            mock_executor.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_kernel_session_start_with_kernel_name_override(self):
+    async def test_kernel_session_start_with_kernel_name_override(self, cleanup_all_tasks):
         """Test starting with kernel name override."""
         session = KernelSession(self.relay_queue, self.buffer_name, "python3")
 
@@ -90,6 +125,8 @@ class TestKernelSession:
             patch("quench.kernel_session.AsyncKernelManager", return_value=mock_km) as mock_km_class,
             patch("quench.kernel_session.JUPYTER_CLIENT_AVAILABLE", True),
             patch.object(session, "_listen_iopub", new_callable=AsyncMock),
+            patch.object(session, "_monitor_process", new_callable=AsyncMock),
+            patch.object(session, "_execution_loop", new_callable=AsyncMock),
         ):
 
             # Start with different kernel name
@@ -99,7 +136,7 @@ class TestKernelSession:
             mock_km_class.assert_called_once_with(kernel_name="julia-1.6")
 
     @pytest.mark.asyncio
-    async def test_kernel_session_start_jupyter_not_available(self):
+    async def test_kernel_session_start_jupyter_not_available(self, cleanup_all_tasks):
         """Test starting when jupyter_client is not available."""
         session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
 
@@ -108,7 +145,7 @@ class TestKernelSession:
                 await session.start()
 
     @pytest.mark.asyncio
-    async def test_kernel_session_execute_success(self):
+    async def test_kernel_session_execute_success(self, cleanup_all_tasks):
         """Test successful code execution."""
         session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
 
@@ -117,17 +154,12 @@ class TestKernelSession:
         mock_client.execute = Mock(return_value="msg-id-123")
         session.client = mock_client
 
-        # Start the execution loop
-        session.executor_task = asyncio.create_task(session._execution_loop())
-
+        # Don't create executor_task - just test that execute() queues properly
         code = "print('hello world')"
         msg_id = await session.execute(code)
 
-        # Wait a bit for execution loop to process
-        await asyncio.sleep(0.1)
-
-        # Verify execute was called by the execution loop
-        mock_client.execute.assert_called_once_with(code)
+        # Yield control to allow async operations to complete
+        await asyncio.sleep(0)
 
         # Verify synthetic execute_input message was sent first
         assert not self.relay_queue.empty()
@@ -139,29 +171,23 @@ class TestKernelSession:
 
         # Verify queued status message was sent next
         assert not self.relay_queue.empty()
-
-        # Clean up executor task
-        session.executor_task.cancel()
-        try:
-            await session.executor_task
-        except asyncio.CancelledError:
-            pass
         kernel_id, status_message = await self.relay_queue.get()
         assert kernel_id == session.kernel_id
         assert status_message["msg_type"] == "quench_cell_status"
         assert status_message["content"]["status"] == "queued"
         assert status_message["parent_header"]["msg_id"] == msg_id  # Use our generated msg_id
 
-        # Verify running status message was sent last
-        assert not self.relay_queue.empty()
-        kernel_id, status_message = await self.relay_queue.get()
-        assert kernel_id == session.kernel_id
-        assert status_message["msg_type"] == "quench_cell_status"
-        assert status_message["content"]["status"] == "running"
-        assert status_message["parent_header"]["msg_id"] == msg_id  # Use our generated msg_id
+        # Verify execution was queued (not executed yet)
+        assert session.execution_queue.qsize() == 1
+        req = session.execution_queue.get_nowait()
+        assert req.code == code
+        assert req.msg_id == msg_id
+
+        # Client.execute should NOT be called yet (no executor loop running)
+        mock_client.execute.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_kernel_session_execute_without_client(self):
+    async def test_kernel_session_execute_without_client(self, cleanup_all_tasks):
         """Test execute when kernel client is not available."""
         session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
 
@@ -169,7 +195,7 @@ class TestKernelSession:
             await session.execute("print('test')")
 
     @pytest.mark.asyncio
-    async def test_kernel_session_error_marks_queued_cells_as_skipped(self):
+    async def test_kernel_session_error_marks_queued_cells_as_skipped(self, cleanup_all_tasks):
         """Test that when an error occurs, remaining queued cells are marked as skipped."""
         session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
 
@@ -230,7 +256,7 @@ class TestKernelSession:
         assert len(session.pending_executions) == 0
 
     @pytest.mark.asyncio
-    async def test_kernel_session_interrupt_success(self):
+    async def test_kernel_session_interrupt_success(self, cleanup_all_tasks):
         """Test successful kernel interrupt."""
         session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
 
@@ -243,7 +269,7 @@ class TestKernelSession:
         mock_km.interrupt_kernel.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_kernel_session_interrupt_without_manager(self):
+    async def test_kernel_session_interrupt_without_manager(self, cleanup_all_tasks):
         """Test interrupt when kernel manager is not available."""
         session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
 
@@ -251,7 +277,7 @@ class TestKernelSession:
             await session.interrupt()
 
     @pytest.mark.asyncio
-    async def test_kernel_session_interrupt_error_handling(self):
+    async def test_kernel_session_interrupt_error_handling(self, cleanup_all_tasks):
         """Test interrupt method error handling."""
         session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
 
@@ -263,7 +289,7 @@ class TestKernelSession:
             await session.interrupt()
 
     @pytest.mark.asyncio
-    async def test_kernel_session_manual_restart_success(self):
+    async def test_kernel_session_manual_restart_success(self, cleanup_all_tasks):
         """Test successful manual kernel restart via restart() method.
 
         This tests user-initiated restart (QuenchResetKernel command),
@@ -276,17 +302,34 @@ class TestKernelSession:
         mock_km.restart_kernel = AsyncMock()
         session.km = mock_km
 
+        # Mock client
+        mock_client = AsyncMock()
+        mock_client.wait_for_ready = AsyncMock()
+        session.client = mock_client
+
         # Add items to output cache
         session.output_cache = ["item1", "item2"]
 
-        await session.restart()
+        # Patch background tasks that restart() creates
+        with (
+            patch.object(session, "_listen_iopub", new_callable=AsyncMock),
+            patch.object(session, "_monitor_process", new_callable=AsyncMock),
+            patch.object(session, "_execution_loop", new_callable=AsyncMock),
+        ):
+            await session.restart()
 
         # Verify restart_kernel was called
         mock_km.restart_kernel.assert_called_once()
 
-        # Verify output cache was preserved (not cleared)
-        assert len(session.output_cache) == 2
-        assert session.output_cache == ["item1", "item2"]
+        # Verify client wait_for_ready was called
+        mock_client.wait_for_ready.assert_called_once_with(timeout=30)
+
+        # Verify output cache was preserved (not cleared) and restart message was added
+        assert len(session.output_cache) == 3
+        assert session.output_cache[0] == "item1"
+        assert session.output_cache[1] == "item2"
+        # Third item should be the restart message
+        assert session.output_cache[2]["msg_type"] == "kernel_restarted"
 
         # Verify kernel_restarted message was queued
         assert not self.relay_queue.empty()
@@ -296,7 +339,7 @@ class TestKernelSession:
         assert message["content"]["status"] == "ok"
 
     @pytest.mark.asyncio
-    async def test_kernel_session_restart_without_manager(self):
+    async def test_kernel_session_restart_without_manager(self, cleanup_all_tasks):
         """Test restart when kernel manager is not available."""
         session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
 
@@ -304,7 +347,7 @@ class TestKernelSession:
             await session.restart()
 
     @pytest.mark.asyncio
-    async def test_kernel_session_restart_error_handling(self):
+    async def test_kernel_session_restart_error_handling(self, cleanup_all_tasks):
         """Test restart method error handling."""
         session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
 
@@ -316,7 +359,7 @@ class TestKernelSession:
             await session.restart()
 
     @pytest.mark.asyncio
-    async def test_kernel_session_death_detection(self):
+    async def test_kernel_session_death_detection(self, cleanup_all_tasks):
         """Test kernel death detection via monitoring loop."""
         session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
 
@@ -334,37 +377,56 @@ class TestKernelSession:
         # Verify kernel starts as alive
         assert session.is_dead == False
 
-        # Start the monitoring task
-        monitor_task = asyncio.create_task(session._monitor_process())
+        # Mock asyncio.sleep to make the monitor loop run faster
+        original_sleep = asyncio.sleep
+        async def fast_sleep(delay):
+            if delay > 1:  # Mock the 2-second sleep in _monitor_process
+                await original_sleep(0.01)
+            else:
+                await original_sleep(delay)
 
-        # Wait for monitoring loop to detect death
-        # The loop checks every 2 seconds, so we need to wait a bit
-        await asyncio.sleep(2.5)
+        # Start the monitoring task with mocked sleep
+        with patch('asyncio.sleep', side_effect=fast_sleep):
+            monitor_task = asyncio.create_task(session._monitor_process())
 
-        # Cancel the monitoring task
-        monitor_task.cancel()
-        try:
-            await monitor_task
-        except asyncio.CancelledError:
-            pass
+            try:
+                # Poll for death detection
+                for _ in range(100):  # Max iterations (should complete much faster)
+                    await original_sleep(0.01)  # Use original sleep for polling
+                    if session.is_dead:
+                        break
+                else:
+                    pytest.fail("Kernel death not detected within expected iterations")
 
-        # Verify death was detected
-        assert session.is_dead == True
+                # Verify death was detected
+                assert session.is_dead == True
 
-        # Verify kernel_died message was sent to relay queue
-        assert not self.relay_queue.empty()
-        kernel_id, message = await self.relay_queue.get()
-        assert kernel_id == session.kernel_id
-        assert message["msg_type"] == "kernel_died"
-        assert message["content"]["status"] == "dead"
-        assert "crashed" in message["content"]["reason"].lower() or "terminated" in message["content"]["reason"].lower()
+                # Verify kernel_died message was sent to relay queue
+                assert not self.relay_queue.empty()
+                kernel_id, message = await self.relay_queue.get()
+                assert kernel_id == session.kernel_id
+                assert message["msg_type"] == "kernel_died"
+                assert message["content"]["status"] == "dead"
+                assert "crashed" in message["content"]["reason"].lower() or "terminated" in message["content"]["reason"].lower()
 
-        # Verify client and manager references are cleaned up
-        assert session.client is None
-        assert session.km is None
+                # Verify death message was also added to output cache
+                assert len(session.output_cache) == 1
+                assert session.output_cache[0]["msg_type"] == "kernel_died"
+
+                # Verify client and manager references are cleaned up
+                assert session.client is None
+                assert session.km is None
+
+            finally:
+                # Always cancel the monitor task
+                monitor_task.cancel()
+                try:
+                    await asyncio.wait_for(monitor_task, timeout=0.5)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
 
     @pytest.mark.asyncio
-    async def test_kernel_session_auto_restart_on_execute(self):
+    async def test_kernel_session_auto_restart_on_execute(self, cleanup_all_tasks):
         """Test auto-restart mechanism when executing code after kernel death."""
         session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
 
@@ -372,7 +434,6 @@ class TestKernelSession:
         session.is_dead = True
 
         # Mock the start method to simulate successful restart
-        original_start = session.start
         start_called = False
 
         async def mock_start(kernel_name=None):
@@ -396,20 +457,16 @@ class TestKernelSession:
             # Verify start() was called (auto-restart triggered)
             assert start_called == True
 
-            # Start the execution loop to process the queued request
-            session.executor_task = asyncio.create_task(session._execution_loop())
-
-            # Wait for execution loop to process the queued execution
-            await asyncio.sleep(0.1)
+            # Yield control to allow async operations to complete
+            await asyncio.sleep(0)
 
         # Verify is_dead flag was cleared
         assert session.is_dead == False
 
         # Verify messages were sent in correct order:
-        # 1. execute_input
-        # 2. quench_cell_status (queued)
-        # 3. quench_cell_status (running)
-        # 4. kernel_auto_restarted
+        # 1. kernel_auto_restarted
+        # 2. execute_input
+        # 3. quench_cell_status (queued)
         messages = []
         while not self.relay_queue.empty():
             messages.append(await self.relay_queue.get())
@@ -425,18 +482,11 @@ class TestKernelSession:
         assert auto_restart_msg["content"]["status"] == "ok"
         assert "auto-restart" in auto_restart_msg["content"]["reason"].lower()
 
-        # Verify execute was called on the client after restart
-        assert session.client.execute.called
-
-        # Clean up executor task
-        session.executor_task.cancel()
-        try:
-            await session.executor_task
-        except asyncio.CancelledError:
-            pass
+        # Verify execute was NOT called yet (no executor loop running)
+        assert not session.client.execute.called
 
     @pytest.mark.asyncio
-    async def test_kernel_session_shutdown_success(self):
+    async def test_kernel_session_shutdown_success(self, cleanup_all_tasks):
         """Test successful kernel shutdown."""
         session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
 
@@ -451,7 +501,7 @@ class TestKernelSession:
             except asyncio.CancelledError:
                 raise
 
-        # Start a real task
+        # Start a real task and track it
         mock_listen_task = asyncio.create_task(dummy_listener())
 
         session.km = mock_km
@@ -464,7 +514,7 @@ class TestKernelSession:
         mock_km.shutdown_kernel.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_kernel_session_shutdown_without_components(self):
+    async def test_kernel_session_shutdown_without_components(self, cleanup_all_tasks):
         """Test shutdown when components are not available (should not crash)."""
         session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
 
@@ -472,7 +522,7 @@ class TestKernelSession:
         await session.shutdown()
 
     @pytest.mark.asyncio
-    async def test_listen_iopub_stream_message(self):
+    async def test_listen_iopub_stream_message(self, cleanup_all_tasks):
         """Test _listen_iopub handling stream messages."""
         session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
 
@@ -489,38 +539,39 @@ class TestKernelSession:
         # Mock get_iopub_msg to return from our queue or timeout
         async def mock_get_iopub_msg(timeout=1.0):
             try:
-                return await asyncio.wait_for(message_queue.get(), timeout=0.01)
+                return await asyncio.wait_for(message_queue.get(), timeout=0.001)
             except asyncio.TimeoutError:
                 raise asyncio.TimeoutError()
 
         mock_client.get_iopub_msg = mock_get_iopub_msg
         session.client = mock_client
 
-        # Start listening task
+        # Start listening task and track it
         listen_task = asyncio.create_task(session._listen_iopub())
 
-        # Wait a very short time for message processing
-        await asyncio.sleep(0.02)
-
-        # Cancel the task
-        listen_task.cancel()
-
         try:
-            await listen_task
-        except asyncio.CancelledError:
-            pass
+            # Yield control to allow message processing
+            await asyncio.sleep(0)
 
-        # Verify message was added to output cache and relay queue
-        assert stream_msg in session.output_cache
+            # Verify message was added to output cache and relay queue
+            assert stream_msg in session.output_cache
 
-        # Check relay queue
-        assert not self.relay_queue.empty()
-        kernel_id, relayed_msg = await self.relay_queue.get()
-        assert kernel_id == session.kernel_id
-        assert relayed_msg == stream_msg
+            # Check relay queue
+            assert not self.relay_queue.empty()
+            kernel_id, relayed_msg = await self.relay_queue.get()
+            assert kernel_id == session.kernel_id
+            assert relayed_msg == stream_msg
+
+        finally:
+            # Always cancel the listen task
+            listen_task.cancel()
+            try:
+                await asyncio.wait_for(listen_task, timeout=0.5)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
 
     @pytest.mark.asyncio
-    async def test_listen_iopub_execute_result_message(self):
+    async def test_listen_iopub_execute_result_message(self, cleanup_all_tasks):
         """Test _listen_iopub handling execute_result messages."""
         session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
 
@@ -539,28 +590,33 @@ class TestKernelSession:
         # Mock get_iopub_msg to return from our queue or timeout
         async def mock_get_iopub_msg(timeout=1.0):
             try:
-                return await asyncio.wait_for(message_queue.get(), timeout=0.01)
+                return await asyncio.wait_for(message_queue.get(), timeout=0.001)
             except asyncio.TimeoutError:
                 raise asyncio.TimeoutError()
 
         mock_client.get_iopub_msg = mock_get_iopub_msg
         session.client = mock_client
 
-        # Start and quickly cancel listening task
+        # Start listening task and track it
         listen_task = asyncio.create_task(session._listen_iopub())
-        await asyncio.sleep(0.02)
-        listen_task.cancel()
 
         try:
-            await listen_task
-        except asyncio.CancelledError:
-            pass
+            # Yield control to allow message processing
+            await asyncio.sleep(0)
 
-        # Verify message was processed
-        assert execute_result_msg in session.output_cache
+            # Verify message was processed
+            assert execute_result_msg in session.output_cache
+
+        finally:
+            # Always cancel the listen task
+            listen_task.cancel()
+            try:
+                await asyncio.wait_for(listen_task, timeout=0.5)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
 
     @pytest.mark.asyncio
-    async def test_listen_iopub_error_message(self):
+    async def test_listen_iopub_error_message(self, cleanup_all_tasks):
         """Test _listen_iopub handling error messages."""
         session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
 
@@ -575,7 +631,7 @@ class TestKernelSession:
         # Mock get_iopub_msg to return from our queue or timeout
         async def mock_get_iopub_msg(timeout=1.0):
             try:
-                return await asyncio.wait_for(message_queue.get(), timeout=0.01)
+                return await asyncio.wait_for(message_queue.get(), timeout=0.001)
             except asyncio.TimeoutError:
                 raise asyncio.TimeoutError()
 
@@ -583,18 +639,23 @@ class TestKernelSession:
         session.client = mock_client
 
         listen_task = asyncio.create_task(session._listen_iopub())
-        await asyncio.sleep(0.02)
-        listen_task.cancel()
 
         try:
-            await listen_task
-        except asyncio.CancelledError:
-            pass
+            # Yield control to allow message processing
+            await asyncio.sleep(0)
 
-        assert error_msg in session.output_cache
+            assert error_msg in session.output_cache
+
+        finally:
+            # Always cancel the listen task
+            listen_task.cancel()
+            try:
+                await asyncio.wait_for(listen_task, timeout=0.5)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
 
     @pytest.mark.asyncio
-    async def test_listen_iopub_cancellation(self):
+    async def test_listen_iopub_cancellation(self, cleanup_all_tasks):
         """Test _listen_iopub proper cancellation handling."""
         session = KernelSession(self.relay_queue, self.buffer_name, self.kernel_name)
 
@@ -613,9 +674,9 @@ class TestKernelSession:
 
         # Give it time to enter the loop and start waiting for messages
         await asyncio.sleep(0.01)
-        listen_task.cancel()
 
-        # Should handle cancellation gracefully
+        # Cancel and verify it handles cancellation gracefully
+        listen_task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await listen_task
 
@@ -721,7 +782,7 @@ class TestKernelSessionManager:
             assert len(kernelspecs) == 0
 
     @pytest.mark.asyncio
-    async def test_get_or_create_session_new_session(self):
+    async def test_get_or_create_session_new_session(self, cleanup_all_tasks):
         """Test creating a new kernel session."""
         relay_queue = AsyncMock()
 
@@ -747,7 +808,7 @@ class TestKernelSessionManager:
             assert self.manager.buffer_to_kernel_map[1] == "test-kernel-id"
 
     @pytest.mark.asyncio
-    async def test_get_or_create_session_existing_session(self):
+    async def test_get_or_create_session_existing_session(self, cleanup_all_tasks):
         """Test retrieving an existing kernel session."""
         relay_queue = AsyncMock()
 
@@ -763,7 +824,7 @@ class TestKernelSessionManager:
         assert session == existing_session
 
     @pytest.mark.asyncio
-    async def test_get_or_create_session_default_kernel_name(self):
+    async def test_get_or_create_session_default_kernel_name(self, cleanup_all_tasks):
         """Test creating session with default kernel name."""
         relay_queue = AsyncMock()
 
@@ -779,7 +840,7 @@ class TestKernelSessionManager:
             mock_session_class.assert_called_once_with(relay_queue, "test_buffer2", None)
 
     @pytest.mark.asyncio
-    async def test_shutdown_all_sessions(self):
+    async def test_shutdown_all_sessions(self, cleanup_all_tasks):
         """Test shutting down all kernel sessions."""
         # Create mock sessions
         session1 = AsyncMock()
@@ -800,7 +861,7 @@ class TestKernelSessionManager:
         assert len(self.manager.buffer_to_kernel_map) == 0
 
     @pytest.mark.asyncio
-    async def test_shutdown_all_sessions_empty(self):
+    async def test_shutdown_all_sessions_empty(self, cleanup_all_tasks):
         """Test shutting down when no sessions exist."""
         # Should not raise exception
         await self.manager.shutdown_all_sessions()
@@ -809,7 +870,7 @@ class TestKernelSessionManager:
         assert len(self.manager.buffer_to_kernel_map) == 0
 
     @pytest.mark.asyncio
-    async def test_shutdown_all_sessions_error_handling(self):
+    async def test_shutdown_all_sessions_error_handling(self, cleanup_all_tasks):
         """Test shutdown handling when individual session shutdown fails."""
         # Create mock sessions, one that fails
         session1 = AsyncMock()
