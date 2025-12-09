@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quench-nvim"
-version = "0.1.0"
+version = "1.0.0"
 description = "Interactive Python development in Neovim using cell-based execution"
 readme = "README.md"
 requires-python = ">=3.9"
