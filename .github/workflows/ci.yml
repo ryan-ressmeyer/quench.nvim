@@ -78,6 +78,7 @@ jobs:
 
   test:
     needs: [python-lint, lua-lint, type-check]
+    if: always()
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

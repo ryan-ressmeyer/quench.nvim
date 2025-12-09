@@ -553,7 +553,7 @@ class TestKernelSession:
 
         try:
             # Yield control to allow message processing
-            await asyncio.sleep(0)
+            await asyncio.sleep(0.01)
 
             # Verify message was added to output cache and relay queue
             assert stream_msg in session.output_cache
@@ -604,7 +604,7 @@ class TestKernelSession:
 
         try:
             # Yield control to allow message processing
-            await asyncio.sleep(0)
+            await asyncio.sleep(0.01)
 
             # Verify message was processed
             assert execute_result_msg in session.output_cache
@@ -644,7 +644,7 @@ class TestKernelSession:
 
         try:
             # Yield control to allow message processing
-            await asyncio.sleep(0)
+            await asyncio.sleep(0.01)
 
             assert error_msg in session.output_cache
 
